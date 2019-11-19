@@ -5,7 +5,7 @@ objlab is a simple Wavefront .obj viewer + some features, written in C++11.
 ## Requirements
 
 * cmake
-* OpenGL 2.x
+* OpenGL 3.x
 
 ## Build
 
@@ -34,5 +34,9 @@ objlab is licensed under MIT license.
 
 * TinyObjLoader : MIT license.
 * imgui : MIT license.
+* ImGuizmo : MIT license.
 * stb_image, stb_image_write, stb_image_resize : Public domain
 * glfw3 : zlib/libpng license.
+* ghc filesystem : BSD-3 license.
+* ionicons : MIT license.
+* Roboto font : Apache 2.0 license.

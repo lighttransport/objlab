@@ -16,25 +16,40 @@ set(GLFW_INSTALL OFF CACHE INTERNAL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glfw)
 
 set(OBJLAB_SOURCES
+    src/app.cc
     src/main.cc
     )
 
 set(OBJLAB_DEP_SOURCES
-    src/glad.c
+    #src/glad.c
     src/trackball.cc
+    deps/glad/src/glad.c
     deps/imgui/imgui.cpp
     deps/imgui/imgui_draw.cpp
     deps/imgui/imgui_widgets.cpp
+    deps/imgui/imgui_impl_opengl3.cpp
+    deps/imgui/imgui_impl_glfw.cpp
+    deps/ImGuizmo/ImGuizmo.cpp
     )
 
 add_executable(${BUILD_TARGET} ${OBJLAB_SOURCES} ${OBJLAB_DEP_SOURCES})
+
+# [filesytem]
+target_include_directories(${BUILD_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/filesystem/include")
+
+# [imgui]
+target_include_directories(${BUILD_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/deps/")
+
+# [glad]
+add_definitions("-DIMGUI_IMPL_OPENGL_LOADER_GLAD")
+target_include_directories(${BUILD_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/deps/glad/include")
 
 target_include_directories(${BUILD_TARGET} PRIVATE ${glfw_INCLUDE_DIRS})
 target_link_libraries(${BUILD_TARGET} glfw ${OPENGL_LIBRARIES} ${CMAKE_DL_LIBS})
 
 # Increase warning level for clang.
 IF (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set_source_files_properties(${OBJLAB_SOURCES} PROPERTIES COMPILE_FLAGS "-Weverything -Wno-system-headers -Werror -Wno-padded -Wno-c++98-compat-pedantic -Wno-documentation -Wno-documentation-unknown-command -Wno-reserved-id-macro")
+    set_source_files_properties(${OBJLAB_SOURCES} PROPERTIES COMPILE_FLAGS "-Weverything -Wno-system-headers -Werror -Wno-padded -Wno-c++98-compat-pedantic -Wno-documentation -Wno-documentation-unknown-command -Wno-reserved-id-macro -Wno-unused-variable -Wno-unused-function")
 ENDIF ()
 
 

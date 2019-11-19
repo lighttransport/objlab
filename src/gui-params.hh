@@ -4,8 +4,8 @@ namespace objlab {
 
 struct gui_parameters {
 
-  int width = 768;
-  int height = 768;
+  int width = 1400;
+  int height = 800;
 
   float prevMouseX, prevMouseY;
   bool mouseLeftPressed;

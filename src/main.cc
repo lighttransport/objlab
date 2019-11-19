@@ -19,7 +19,24 @@
 #pragma clang diagnostic ignored "-Weverything"
 #endif
 
-#include "glad.h"
+// std::filesytem in C++11
+#include "ghc/filesystem.hpp"
+namespace fs = ghc::filesystem;
+
+// embeded font data for ImGui
+#include "imgui/IconsIonicons.h"
+#include "imgui/ionicons_embed.inc.h"
+#include "imgui/roboto_mono_embed.inc.h"
+
+// deps/imgui
+#include "imgui/imgui.h"
+
+#include "imgui/imgui_impl_glfw.h"
+#include "imgui/imgui_impl_opengl3.h"
+
+#include "ImGuizmo/ImGuizmo.h"
+
+#include "glad/glad.h"
 
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -50,37 +67,13 @@
 #pragma clang diagnostic pop
 #endif
 
+#include "app.hh"
 #include "draw-context.hh"
 #include "gui-params.hh"
 
 static void glfw_error_callback(int error, const char* description) {
   fprintf(stderr, "Glfw Error %d: %s\n", error, description);
 }
-
-#if 0
-typedef struct {
-  GLuint vb_id;  // vertex buffer id
-  int numTriangles;
-  size_t material_id;
-} DrawObject;
-
-static std::vector<DrawObject> gDrawObjects;
-#endif
-
-#if 0
-int width = 768;
-int height = 768;
-
-double prevMouseX, prevMouseY;
-bool mouseLeftPressed;
-bool mouseMiddlePressed;
-bool mouseRightPressed;
-float curr_quat[4];
-float prev_quat[4];
-float eye[3], lookat[3], up[3];
-
-GLFWwindow* window;
-#endif
 
 static std::string GetBaseDir(const std::string& filepath) {
   if (filepath.find_last_of("/\\") != std::string::npos)
@@ -101,7 +94,7 @@ static bool FileExists(const std::string& abs_filename) {
   return ret;
 }
 
-static void CheckErrors(std::string desc) {
+static void CheckGLErrors(std::string desc) {
   GLenum e = glGetError();
   if (e != GL_NO_ERROR) {
     fprintf(stderr, "OpenGL error in \"%s\": %d (%d)\n", desc.c_str(), e, e);
@@ -540,6 +533,7 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
       if (buffer.size() > 0) {
         glGenBuffers(1, &o.vb_id);
         glBindBuffer(GL_ARRAY_BUFFER, o.vb_id);
+        std::cout << "vb_id = " << o.vb_id << "\n";
         glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(buffer.size() * sizeof(float)),
                      &buffer.at(0), GL_STATIC_DRAW);
         o.numTriangles = int(buffer.size() / (3 + 3 + 3 + 2) /
@@ -562,6 +556,8 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
 }
 
 static void reshapeFunc(GLFWwindow* window, int w, int h) {
+  std::cout << "reshape\n" << std::endl;
+
   int fb_w, fb_h;
   // Get actual framebuffer size.
   glfwGetFramebufferSize(window, &fb_w, &fb_h);
@@ -585,6 +581,12 @@ static void keyboardFunc(GLFWwindow* window, int key, int scancode, int action,
   (void)window;
   (void)scancode;
   (void)mods;
+
+  ImGuiIO& io = ImGui::GetIO();
+  if (io.WantCaptureKeyboard) {
+    return;
+  }
+
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
 #if 0
     // Move camera
@@ -722,7 +724,7 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
         2, GL_FLOAT, stride,
         reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
     glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
-    CheckErrors("drawarrays");
+    CheckGLErrors("drawarrays");
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
@@ -755,7 +757,7 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
         reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
 
     glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
-    CheckErrors("drawarrays");
+    CheckGLErrors("drawarrays");
   }
 }
 
@@ -775,6 +777,381 @@ static void Init(objlab::gui_parameters* params) {
   params->up[2] = 0.0f;
 }
 
+namespace {
+
+void gui_new_frame() {
+  // glfwPollEvents();
+  ImGui_ImplOpenGL3_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+}
+
+void gl_new_frame(GLFWwindow* window, ImVec4 clear_color, int* display_w,
+                  int* display_h) {
+  // Rendering
+  glfwGetFramebufferSize(window, display_w, display_h);
+  glViewport(0, 0, *display_w, *display_h);
+  glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
+  glEnable(GL_DEPTH_TEST);
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+
+void gl_gui_end_frame(GLFWwindow* window) {
+
+  ImGuiIO& io = ImGui::GetIO();
+
+  // glUseProgram(0);
+
+  ImGui::Render();
+
+  // GLint last_program;
+  // glGetIntegerv(GL_CURRENT_PROGRAM, &last_program);
+  // std::cout << "last program = " << last_program << "\n";
+  // glUseProgram(0);
+
+  ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+  // Update and Render additional Platform Windows
+  // (Platform functions may change the current OpenGL context, so we
+  // save/restore it to make it easier to paste this code elsewhere.
+  //  For this specific demo app we could also call
+  //  glfwMakeContextCurrent(window) directly)
+  if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+    GLFWwindow* backup_current_context = glfwGetCurrentContext();
+    ImGui::UpdatePlatformWindows();
+    ImGui::RenderPlatformWindowsDefault();
+    glfwMakeContextCurrent(backup_current_context);
+  }
+
+  // glUseProgram(last_program);
+
+  glfwMakeContextCurrent(window);
+  glfwSwapBuffers(window);
+  // glFlush();
+
+  static int fps_count = 0;
+  static double currentTime = objlab::GetCurrentTimeInSeconds();
+  static double previousTime = currentTime;
+  static char title[256];
+
+  fps_count++;
+  currentTime = objlab::GetCurrentTimeInSeconds();
+  if (currentTime - previousTime >= 1.0) {
+    snprintf(title, 255, "ObjLab [%dFPS]", fps_count);
+    glfwSetWindowTitle(window, title);
+    fps_count = 0;
+    previousTime = currentTime;
+  }
+}
+
+static void initialize_imgui(GLFWwindow* window) {
+  // Setup Dear ImGui context
+  ImGui::CreateContext();
+  auto& io = ImGui::GetIO();
+
+#if 0
+  // Read .ini file from parent directory if imgui.ini does not exist in the
+  // current directory.
+  if (fs::exists("../imgui.ini") && !fs::exists("./imgui.ini")) {
+    std::cout << "Use ../imgui.ini as Init file.\n";
+    io.IniFilename = "../imgui.ini";
+  }
+#endif
+
+#if 0
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+  // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+
+  float default_font_scale = 17.0f;
+  ImFontConfig roboto_config;
+  strcpy(roboto_config.Name, "Roboto");
+  roboto_config.SizePixels = default_font_scale;
+#if 0
+#if defined(__APPLE__)
+  // Assume retina display. 2 is suffice
+  roboto_config.OversampleH = 2;
+  roboto_config.OversampleV = 2;
+#else
+  // 2 is a bit blurry on Windows. 4~8 gives nicer anti aliasing
+  roboto_config.OversampleH = 6;
+  roboto_config.OversampleV = 6;
+#endif
+#endif
+
+  io.Fonts->AddFontFromMemoryCompressedTTF(roboto_mono_compressed_data,
+                                           roboto_mono_compressed_size,
+                                           default_font_scale, &roboto_config);
+
+  // Load Icon fonts
+  ImFontConfig ionicons_config;
+  ionicons_config.MergeMode = true;
+  ionicons_config.GlyphMinAdvanceX = default_font_scale;
+  ionicons_config.OversampleH = 1;
+  ionicons_config.OversampleV = 1;
+  static const ImWchar icon_ranges[] = {ICON_MIN_II, ICON_MAX_II, 0};
+  io.Fonts->AddFontFromMemoryCompressedTTF(
+      ionicons_compressed_data, ionicons_compressed_size, default_font_scale,
+      &ionicons_config, icon_ranges);
+#endif
+
+  ImGui::StyleColorsDark();
+
+  // Setup Platform/Renderer bindings
+  ImGui_ImplGlfw_InitForOpenGL(window, true);
+  ImGui_ImplOpenGL3_Init();
+}
+
+void create_transparent_docking_area(const ImVec2 pos, const ImVec2 size,
+                                     std::string name) {
+  using namespace ImGui;
+
+  const auto window_name = name + "_window";
+  const auto dockspace_name = name + "_dock";
+
+  ImGuiDockNodeFlags dockspace_flags =
+      ImGuiDockNodeFlags_PassthruCentralNode |
+      ImGuiDockNodeFlags_NoDockingInCentralNode;
+
+  SetNextWindowPos(pos);
+  SetNextWindowSize(size);
+
+  ImGuiWindowFlags host_window_flags =
+      ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
+      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus |
+      ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
+
+  PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+  PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+  PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+  Begin(window_name.c_str(), nullptr, host_window_flags);
+  PopStyleVar(3);  // we had 3 things added on the stack
+
+  const ImGuiID dockspace_id = GetID(dockspace_name.c_str());
+  DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), dockspace_flags);
+
+  End();
+}
+
+void deinitialize_gui_and_window(GLFWwindow* window) {
+  // Cleanup
+  ImGui_ImplOpenGL3_Shutdown();
+  ImGui_ImplGlfw_Shutdown();
+  ImGui::DestroyContext();
+
+  glfwDestroyWindow(window);
+  glfwTerminate();
+}
+
+inline void rotationY(const float angle, float* m16) {
+  float c = cosf(angle);
+  float s = sinf(angle);
+
+  m16[0] = c;
+  m16[1] = 0.0f;
+  m16[2] = -s;
+  m16[3] = 0.0f;
+  m16[4] = 0.0f;
+  m16[5] = 1.f;
+  m16[6] = 0.0f;
+  m16[7] = 0.0f;
+  m16[8] = s;
+  m16[9] = 0.0f;
+  m16[10] = c;
+  m16[11] = 0.0f;
+  m16[12] = 0.f;
+  m16[13] = 0.f;
+  m16[14] = 0.f;
+  m16[15] = 1.0f;
+}
+
+void Frustum(float left, float right, float bottom, float top, float znear,
+             float zfar, float* m16) {
+  float temp, temp2, temp3, temp4;
+  temp = 2.0f * znear;
+  temp2 = right - left;
+  temp3 = top - bottom;
+  temp4 = zfar - znear;
+  m16[0] = temp / temp2;
+  m16[1] = 0.0;
+  m16[2] = 0.0;
+  m16[3] = 0.0;
+  m16[4] = 0.0;
+  m16[5] = temp / temp3;
+  m16[6] = 0.0;
+  m16[7] = 0.0;
+  m16[8] = (right + left) / temp2;
+  m16[9] = (top + bottom) / temp3;
+  m16[10] = (-zfar - znear) / temp4;
+  m16[11] = -1.0f;
+  m16[12] = 0.0;
+  m16[13] = 0.0;
+  m16[14] = (-temp * zfar) / temp4;
+  m16[15] = 0.0;
+}
+
+void Perspective(float fovyInDegrees, float aspectRatio, float znear,
+                 float zfar, float* m16) {
+  float ymax, xmax;
+  ymax = znear * std::tan(fovyInDegrees * 3.141592f / 180.0f);
+  xmax = ymax * aspectRatio;
+  Frustum(-xmax, xmax, -ymax, ymax, znear, zfar, m16);
+}
+
+void OrthoGraphic(const float l, float r, float b, const float t, float zn,
+                  const float zf, float* m16) {
+  m16[0] = 2 / (r - l);
+  m16[1] = 0.0f;
+  m16[2] = 0.0f;
+  m16[3] = 0.0f;
+  m16[4] = 0.0f;
+  m16[5] = 2 / (t - b);
+  m16[6] = 0.0f;
+  m16[7] = 0.0f;
+  m16[8] = 0.0f;
+  m16[9] = 0.0f;
+  m16[10] = 1.0f / (zf - zn);
+  m16[11] = 0.0f;
+  m16[12] = (l + r) / (l - r);
+  m16[13] = (t + b) / (b - t);
+  m16[14] = zn / (zn - zf);
+  m16[15] = 1.0f;
+}
+
+void Cross(const float* a, const float* b, float* r) {
+  r[0] = a[1] * b[2] - a[2] * b[1];
+  r[1] = a[2] * b[0] - a[0] * b[2];
+  r[2] = a[0] * b[1] - a[1] * b[0];
+}
+
+float Dot(const float* a, const float* b) {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+void Normalize(const float* a, float* r) {
+  float il =
+      1.f / (std::sqrt(Dot(a, a)) + std::numeric_limits<float>::epsilon());
+  r[0] = a[0] * il;
+  r[1] = a[1] * il;
+  r[2] = a[2] * il;
+}
+
+void LookAt(const float* eye, const float* at, const float* up, float* m16) {
+  float X[3], Y[3], Z[3], tmp[3];
+
+  tmp[0] = eye[0] - at[0];
+  tmp[1] = eye[1] - at[1];
+  tmp[2] = eye[2] - at[2];
+  // Z.normalize(eye - at);
+  Normalize(tmp, Z);
+  Normalize(up, Y);
+  // Y.normalize(up);
+
+  Cross(Y, Z, tmp);
+  // tmp.cross(Y, Z);
+  Normalize(tmp, X);
+  // X.normalize(tmp);
+
+  Cross(Z, X, tmp);
+  // tmp.cross(Z, X);
+  Normalize(tmp, Y);
+  // Y.normalize(tmp);
+
+  m16[0] = X[0];
+  m16[1] = Y[0];
+  m16[2] = Z[0];
+  m16[3] = 0.0f;
+  m16[4] = X[1];
+  m16[5] = Y[1];
+  m16[6] = Z[1];
+  m16[7] = 0.0f;
+  m16[8] = X[2];
+  m16[9] = Y[2];
+  m16[10] = Z[2];
+  m16[11] = 0.0f;
+  m16[12] = -Dot(X, eye);
+  m16[13] = -Dot(Y, eye);
+  m16[14] = -Dot(Z, eye);
+  m16[15] = 1.0f;
+}
+
+void EditTransform(const float* cameraView, float* cameraProjection,
+                   float* matrix) {
+  static ImGuizmo::OPERATION mCurrentGizmoOperation(ImGuizmo::TRANSLATE);
+  static ImGuizmo::MODE mCurrentGizmoMode(ImGuizmo::LOCAL);
+  static bool useSnap = false;
+  static float snap[3] = {1.f, 1.f, 1.f};
+  static float bounds[] = {-0.5f, -0.5f, -0.5f, 0.5f, 0.5f, 0.5f};
+  static float boundsSnap[] = {0.1f, 0.1f, 0.1f};
+  static bool boundSizing = false;
+  static bool boundSizingSnap = false;
+
+  if (ImGui::IsKeyPressed(90)) mCurrentGizmoOperation = ImGuizmo::TRANSLATE;
+  if (ImGui::IsKeyPressed(69)) mCurrentGizmoOperation = ImGuizmo::ROTATE;
+  if (ImGui::IsKeyPressed(82))  // r Key
+    mCurrentGizmoOperation = ImGuizmo::SCALE;
+  if (ImGui::RadioButton("Translate",
+                         mCurrentGizmoOperation == ImGuizmo::TRANSLATE))
+    mCurrentGizmoOperation = ImGuizmo::TRANSLATE;
+  ImGui::SameLine();
+  if (ImGui::RadioButton("Rotate", mCurrentGizmoOperation == ImGuizmo::ROTATE))
+    mCurrentGizmoOperation = ImGuizmo::ROTATE;
+  ImGui::SameLine();
+  if (ImGui::RadioButton("Scale", mCurrentGizmoOperation == ImGuizmo::SCALE))
+    mCurrentGizmoOperation = ImGuizmo::SCALE;
+  float matrixTranslation[3], matrixRotation[3], matrixScale[3];
+  ImGuizmo::DecomposeMatrixToComponents(matrix, matrixTranslation,
+                                        matrixRotation, matrixScale);
+  ImGui::InputFloat3("Tr", matrixTranslation, 3);
+  ImGui::InputFloat3("Rt", matrixRotation, 3);
+  ImGui::InputFloat3("Sc", matrixScale, 3);
+  ImGuizmo::RecomposeMatrixFromComponents(matrixTranslation, matrixRotation,
+                                          matrixScale, matrix);
+
+  if (mCurrentGizmoOperation != ImGuizmo::SCALE) {
+    if (ImGui::RadioButton("Local", mCurrentGizmoMode == ImGuizmo::LOCAL))
+      mCurrentGizmoMode = ImGuizmo::LOCAL;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("World", mCurrentGizmoMode == ImGuizmo::WORLD))
+      mCurrentGizmoMode = ImGuizmo::WORLD;
+  }
+  if (ImGui::IsKeyPressed(83)) useSnap = !useSnap;
+  ImGui::Checkbox("", &useSnap);
+  ImGui::SameLine();
+
+  switch (mCurrentGizmoOperation) {
+    case ImGuizmo::TRANSLATE:
+      ImGui::InputFloat3("Snap", &snap[0]);
+      break;
+    case ImGuizmo::ROTATE:
+      ImGui::InputFloat("Angle Snap", &snap[0]);
+      break;
+    case ImGuizmo::SCALE:
+      ImGui::InputFloat("Scale Snap", &snap[0]);
+      break;
+    case ImGuizmo::BOUNDS:
+      break;
+  }
+  ImGui::Checkbox("Bound Sizing", &boundSizing);
+  if (boundSizing) {
+    ImGui::PushID(3);
+    ImGui::Checkbox("", &boundSizingSnap);
+    ImGui::SameLine();
+    ImGui::InputFloat3("Snap", boundsSnap);
+    ImGui::PopID();
+  }
+
+  ImGuiIO& io = ImGui::GetIO();
+  ImGuizmo::SetRect(0, 0, io.DisplaySize.x, io.DisplaySize.y);
+  ImGuizmo::Manipulate(
+      cameraView, cameraProjection, mCurrentGizmoOperation, mCurrentGizmoMode,
+      matrix, nullptr, useSnap ? &snap[0] : nullptr,
+      boundSizing ? bounds : nullptr, boundSizingSnap ? boundsSnap : nullptr);
+}
+
+}  // namespace
+
 int main(int argc, char** argv) {
   std::string obj_filename = "../models/cornell_box.obj";
 
@@ -791,12 +1168,32 @@ int main(int argc, char** argv) {
 
   Init(&gui_params);
 
+  glfwSetErrorCallback(glfw_error_callback);
+
   if (!glfwInit()) {
     std::cerr << "Failed to initialize GLFW." << std::endl;
     return -1;
   }
 
-  glfwSetErrorCallback(glfw_error_callback);
+#if 0
+    // Decide GL+GLSL versions
+#if defined(__APPLE__)
+    // GL 3.2 + GLSL 150
+    const char* glsl_version = "#version 150";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
+#else
+    // GL 3.0 + GLSL 130
+    const char* glsl_version = "#version 130";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+    //glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
+    //glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
+#endif
+#endif
+
 
   GLFWwindow* window = glfwCreateWindow(gui_params.width, gui_params.height,
                                         "Obj viewer", nullptr, nullptr);
@@ -817,10 +1214,24 @@ int main(int argc, char** argv) {
   glfwSetMouseButtonCallback(window, clickFunc);
   glfwSetCursorPosCallback(window, motionFunc);
 
+#if 1
+  if (gladLoadGL() == 0) {
+    std::cerr << "Failed to initialize GLAD.\n";
+    return -1;
+  }
+#else
   if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
     std::cerr << "Failed to initialize GLAD.\n";
     return -1;
   }
+#endif
+
+  if (!GLAD_GL_VERSION_3_0) {
+    std::cerr << "OpenGL 3.0 context not available.\n";
+    return -1;
+  }
+
+  initialize_imgui(window);
 
   reshapeFunc(window, gui_params.width, gui_params.height);
 
@@ -842,23 +1253,122 @@ int main(int argc, char** argv) {
     maxExtent = 0.5f * (bmax[2] - bmin[2]);
   }
 
-  while (glfwWindowShouldClose(window) == GL_FALSE) {
-    glfwPollEvents();
-    glClearColor(0.1f, 0.2f, 0.3f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  ImVec4 background_color = {0.1F, 0.15F, 0.2F, 1.0F};
 
-    glEnable(GL_DEPTH_TEST);
+  float objectMatrix[16] = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
+                            0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
+
+  static const float identityMatrix[16] = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f,
+                                           0.f, 0.f, 0.f, 0.f, 1.f, 0.f,
+                                           0.f, 0.f, 0.f, 1.f};
+
+  float cameraView[16] = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
+                          0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
+
+  float cameraProjection[16];
+
+  // Camera projection
+  bool isPerspective = false;
+  float fov = 27.f;
+  float viewWidth = 10.f;  // for orthographic
+  float camYAngle = 165.f / 180.f * 3.14159f;
+  float camXAngle = 0.f / 180.f * 3.14159f;
+  float camDistance = 8.f;
+  rotationY(0.f, objectMatrix);
+
+  bool firstFrame = true;
+
+  while (glfwWindowShouldClose(window) == GL_FALSE) {
+    int display_w, display_h;
+
+    glfwPollEvents();
+
+    gui_new_frame();
+
+#if 0
+    ImGuiIO& io = ImGui::GetIO();
+    if (isPerspective) {
+      Perspective(fov, io.DisplaySize.x / io.DisplaySize.y, 0.1f, 100.f,
+                  cameraProjection);
+    } else {
+      float viewHeight = viewWidth * io.DisplaySize.y / io.DisplaySize.x;
+      OrthoGraphic(-viewWidth, viewWidth, -viewHeight, viewHeight, -viewWidth,
+                   viewWidth, cameraProjection);
+    }
+    ImGuizmo::SetOrthographic(!isPerspective);
+
+    ImGuizmo::BeginFrame();
+
+    ImGui::SetNextWindowPos(ImVec2(1024, 100));
+    ImGui::SetNextWindowSize(ImVec2(256, 256));
+
+    // create a window and insert the inspector
+    ImGui::SetNextWindowPos(ImVec2(10, 10));
+    ImGui::SetNextWindowSize(ImVec2(320, 340));
+    ImGui::Begin("Editor");
+    ImGui::Text("Camera");
+    bool viewDirty = false;
+    if (ImGui::RadioButton("Perspective", isPerspective)) isPerspective = true;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Orthographic", !isPerspective))
+      isPerspective = false;
+    if (isPerspective) {
+      ImGui::SliderFloat("Fov", &fov, 20.f, 110.f);
+    } else {
+      ImGui::SliderFloat("Ortho width", &viewWidth, 1, 20);
+    }
+    viewDirty |= ImGui::SliderAngle("Camera X", &camXAngle, 0.f, 179.f);
+    viewDirty |= ImGui::SliderAngle("Camera Y", &camYAngle);
+    viewDirty |= ImGui::SliderFloat("Distance", &camDistance, 1.f, 10.f);
+
+    if (viewDirty || firstFrame) {
+      float eye[] = {cosf(camYAngle) * cosf(camXAngle) * camDistance + 2.f,
+                     sinf(camXAngle) * camDistance,
+                     sinf(camYAngle) * cosf(camXAngle) * camDistance};
+      float at[] = {2.f, 0.f, 0.f};
+      float up[] = {0.f, 1.f, 0.f};
+      LookAt(eye, at, up, cameraView);
+      firstFrame = false;
+    }
+    //ImGuizmo::DrawCube(cameraView, cameraProjection, objectMatrix);
+    //ImGuizmo::DrawGrid(cameraView, cameraProjection, identityMatrix, 10.f);
+
+    ImGui::Text("X: %f Y: %f", double(io.MousePos.x), double(io.MousePos.y));
+    ImGui::Separator();
+    EditTransform(cameraView, cameraProjection, objectMatrix);
+    ImGui::End(); // 'Editor'
+
+    {
+      // Create docking area
+      const auto display_size = ImGui::GetIO().DisplaySize;
+      // Use (0, 20) if you need menu bar
+      create_transparent_docking_area(ImVec2(0, 0),
+                                      ImVec2(display_size.x, display_size.y),
+                                      "main_dockspace");
+    }
+
+    ImGuizmo::ViewManipulate(cameraView, camDistance,
+                             ImVec2(io.DisplaySize.x - 128, 0),
+                             ImVec2(128, 128), 0x10101010);
+#endif
+
+    gl_new_frame(window, background_color, &display_w, &display_h);
+
     glEnable(GL_TEXTURE_2D);
 
+#if 1
     // camera & rotate
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     GLfloat mat[4][4];
-    gluLookAt(double(gui_params.eye[0]), double(gui_params.eye[1]), double(gui_params.eye[2]),
-              double(gui_params.lookat[0]), double(gui_params.lookat[1]), double(gui_params.lookat[2]),
-              double(gui_params.up[0]), double(gui_params.up[1]), double(gui_params.up[2]));
+    gluLookAt(double(gui_params.eye[0]), double(gui_params.eye[1]),
+              double(gui_params.eye[2]), double(gui_params.lookat[0]),
+              double(gui_params.lookat[1]), double(gui_params.lookat[2]),
+              double(gui_params.up[0]), double(gui_params.up[1]),
+              double(gui_params.up[2]));
     build_rotmatrix(mat, gui_params.curr_quat);
     glMultMatrixf(&mat[0][0]);
+#endif
 
     // Fit to -1, 1
     glScalef(1.0f / maxExtent, 1.0f / maxExtent, 1.0f / maxExtent);
@@ -869,8 +1379,10 @@ int main(int argc, char** argv) {
 
     Draw(draw_ctx.draw_objects, materials, textures);
 
-    glfwSwapBuffers(window);
+    gl_gui_end_frame(window);
   }
 
-  glfwTerminate();
+  deinitialize_gui_and_window(window);
+
+  return EXIT_SUCCESS;
 }
