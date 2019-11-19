@@ -12,7 +12,18 @@
 #include <string>
 #include <vector>
 
+#include <chrono>
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#endif
+
 #include "glad.h"
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 #ifdef __APPLE__
 #include <OpenGL/glu.h>
@@ -25,111 +36,38 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#endif
+
 #include "trackball.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-#ifdef _WIN32
-#ifdef __cplusplus
-extern "C" {
-#endif
-#include <windows.h>
-
-#ifdef max
-#undef max
+#ifdef __clang__
+#pragma clang diagnostic pop
 #endif
 
-#ifdef min
-#undef min
-#endif
+#include "draw-context.hh"
+#include "gui-params.hh"
 
-#include <mmsystem.h>
-#ifdef __cplusplus
+static void glfw_error_callback(int error, const char* description) {
+  fprintf(stderr, "Glfw Error %d: %s\n", error, description);
 }
-#endif
-#pragma comment(lib, "winmm.lib")
-#else
-#if defined(__unix__) || defined(__APPLE__)
-#include <sys/time.h>
-#else
-#include <ctime>
-#endif
-#endif
 
-class timerutil {
- public:
-#ifdef _WIN32
-  typedef DWORD time_t;
-
-  timerutil() { ::timeBeginPeriod(1); }
-  ~timerutil() { ::timeEndPeriod(1); }
-
-  void start() { t_[0] = ::timeGetTime(); }
-  void end() { t_[1] = ::timeGetTime(); }
-
-  time_t sec() { return (time_t)((t_[1] - t_[0]) / 1000); }
-  time_t msec() { return (time_t)((t_[1] - t_[0])); }
-  time_t usec() { return (time_t)((t_[1] - t_[0]) * 1000); }
-  time_t current() { return ::timeGetTime(); }
-
-#else
-#if defined(__unix__) || defined(__APPLE__)
-  typedef unsigned long int time_t;
-
-  void start() { gettimeofday(tv + 0, &tz); }
-  void end() { gettimeofday(tv + 1, &tz); }
-
-  time_t sec() { return (time_t)(tv[1].tv_sec - tv[0].tv_sec); }
-  time_t msec() {
-    return this->sec() * 1000 +
-           (time_t)((tv[1].tv_usec - tv[0].tv_usec) / 1000);
-  }
-  time_t usec() {
-    return this->sec() * 1000000 + (time_t)(tv[1].tv_usec - tv[0].tv_usec);
-  }
-  time_t current() {
-    struct timeval t;
-    gettimeofday(&t, NULL);
-    return (time_t)(t.tv_sec * 1000 + t.tv_usec);
-  }
-
-#else  // C timer
-  // using namespace std;
-  typedef clock_t time_t;
-
-  void start() { t_[0] = clock(); }
-  void end() { t_[1] = clock(); }
-
-  time_t sec() { return (time_t)((t_[1] - t_[0]) / CLOCKS_PER_SEC); }
-  time_t msec() { return (time_t)((t_[1] - t_[0]) * 1000 / CLOCKS_PER_SEC); }
-  time_t usec() { return (time_t)((t_[1] - t_[0]) * 1000000 / CLOCKS_PER_SEC); }
-  time_t current() { return (time_t)clock(); }
-
-#endif
-#endif
-
- private:
-#ifdef _WIN32
-  DWORD t_[2];
-#else
-#if defined(__unix__) || defined(__APPLE__)
-  struct timeval tv[2];
-  struct timezone tz;
-#else
-  time_t t_[2];
-#endif
-#endif
-};
-
+#if 0
 typedef struct {
   GLuint vb_id;  // vertex buffer id
   int numTriangles;
   size_t material_id;
 } DrawObject;
 
-std::vector<DrawObject> gDrawObjects;
+static std::vector<DrawObject> gDrawObjects;
+#endif
 
+#if 0
 int width = 768;
 int height = 768;
 
@@ -142,6 +80,7 @@ float prev_quat[4];
 float eye[3], lookat[3], up[3];
 
 GLFWwindow* window;
+#endif
 
 static std::string GetBaseDir(const std::string& filepath) {
   if (filepath.find_last_of("/\\") != std::string::npos)
@@ -206,7 +145,7 @@ struct vec3 {
   }
 };
 
-void normalizeVector(vec3 &v) {
+void normalizeVector(vec3& v) {
   float len2 = v.v[0] * v.v[0] + v.v[1] * v.v[1] + v.v[2] * v.v[2];
   if (len2 > 0.0f) {
     float len = sqrtf(len2);
@@ -218,8 +157,7 @@ void normalizeVector(vec3 &v) {
 }
 
 // Check if `mesh_t` contains smoothing group id.
-bool hasSmoothingGroup(const tinyobj::shape_t& shape)
-{
+bool HasSmoothingGroup(const tinyobj::shape_t& shape) {
   for (size_t i = 0; i < shape.mesh.smoothing_group_ids.size(); i++) {
     if (shape.mesh.smoothing_group_ids[i] > 0) {
       return true;
@@ -228,7 +166,8 @@ bool hasSmoothingGroup(const tinyobj::shape_t& shape)
   return false;
 }
 
-void computeSmoothingNormals(const tinyobj::attrib_t& attrib, const tinyobj::shape_t& shape,
+void ComputeSmoothingNormals(const tinyobj::attrib_t& attrib,
+                             const tinyobj::shape_t& shape,
                              std::map<int, vec3>& smoothVertexNormals) {
   smoothVertexNormals.clear();
   std::map<int, vec3>::iterator iter;
@@ -243,7 +182,7 @@ void computeSmoothingNormals(const tinyobj::attrib_t& attrib, const tinyobj::sha
     int vi[3];      // indexes
     float v[3][3];  // coordinates
 
-    for (int k = 0; k < 3; k++) {
+    for (size_t k = 0; k < 3; k++) {
       vi[0] = idx0.vertex_index;
       vi[1] = idx1.vertex_index;
       vi[2] = idx2.vertex_index;
@@ -251,9 +190,9 @@ void computeSmoothingNormals(const tinyobj::attrib_t& attrib, const tinyobj::sha
       assert(vi[1] >= 0);
       assert(vi[2] >= 0);
 
-      v[0][k] = attrib.vertices[3 * vi[0] + k];
-      v[1][k] = attrib.vertices[3 * vi[1] + k];
-      v[2][k] = attrib.vertices[3 * vi[2] + k];
+      v[0][k] = attrib.vertices[3 * size_t(vi[0]) + k];
+      v[1][k] = attrib.vertices[3 * size_t(vi[1]) + k];
+      v[2][k] = attrib.vertices[3 * size_t(vi[2]) + k];
     }
 
     // Compute the normal of the face
@@ -282,21 +221,19 @@ void computeSmoothingNormals(const tinyobj::attrib_t& attrib, const tinyobj::sha
        iter++) {
     normalizeVector(iter->second);
   }
+}
 
-}  // computeSmoothingNormals
 }  // namespace
 
 static bool LoadObjAndConvert(float bmin[3], float bmax[3],
-                              std::vector<DrawObject>* drawObjects,
+                              std::vector<objlab::DrawObject>* drawObjects,
                               std::vector<tinyobj::material_t>& materials,
                               std::map<std::string, GLuint>& textures,
                               const char* filename) {
   tinyobj::attrib_t attrib;
   std::vector<tinyobj::shape_t> shapes;
 
-  timerutil tm;
-
-  tm.start();
+  auto start_time = std::chrono::system_clock::now();
 
   std::string base_dir = GetBaseDir(filename);
   if (base_dir.empty()) {
@@ -310,8 +247,8 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
 
   std::string warn;
   std::string err;
-  bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, filename,
-                              base_dir.c_str());
+  bool ret = tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err,
+                              filename, base_dir.c_str());
   if (!warn.empty()) {
     std::cout << "WARN: " << warn << std::endl;
   }
@@ -319,20 +256,22 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
     std::cerr << err << std::endl;
   }
 
-  tm.end();
+  auto end_time = std::chrono::system_clock::now();
 
   if (!ret) {
     std::cerr << "Failed to load " << filename << std::endl;
     return false;
   }
 
-  printf("Parsing time: %d [ms]\n", (int)tm.msec());
+  std::chrono::duration<double, std::milli> ms = end_time - start_time;
 
-  printf("# of vertices  = %d\n", (int)(attrib.vertices.size()) / 3);
-  printf("# of normals   = %d\n", (int)(attrib.normals.size()) / 3);
-  printf("# of texcoords = %d\n", (int)(attrib.texcoords.size()) / 2);
-  printf("# of materials = %d\n", (int)materials.size());
-  printf("# of shapes    = %d\n", (int)shapes.size());
+  std::cout << "Parsing time: " << ms.count() << " [ms]\n";
+
+  std::cout << "# of vertices  = " << (attrib.vertices.size()) / 3 << "\n";
+  std::cout << "# of normals   = " << (attrib.normals.size()) / 3 << "\n";
+  std::cout << "# of texcoords = " << (attrib.texcoords.size()) / 2 << "\n";
+  std::cout << "# of materials = " << materials.size() << "\n";
+  std::cout << "# of shapes    = " << shapes.size() << "\n";
 
   // Append `default` material
   materials.push_back(tinyobj::material_t());
@@ -401,14 +340,15 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
 
   {
     for (size_t s = 0; s < shapes.size(); s++) {
-      DrawObject o;
+      objlab::DrawObject o;
       std::vector<float> buffer;  // pos(3float), normal(3float), color(3float)
 
       // Check for smoothing group and compute smoothing normals
       std::map<int, vec3> smoothVertexNormals;
-      if (hasSmoothingGroup(shapes[s]) > 0) {
-        std::cout << "Compute smoothingNormal for shape [" << s << "]" << std::endl;
-        computeSmoothingNormals(attrib, shapes[s], smoothVertexNormals);
+      if (HasSmoothingGroup(shapes[s]) > 0) {
+        std::cout << "Compute smoothingNormal for shape [" << s << "]"
+                  << std::endl;
+        ComputeSmoothingNormals(attrib, shapes[s], smoothVertexNormals);
       }
 
       for (size_t f = 0; f < shapes[s].mesh.indices.size() / 3; f++) {
@@ -422,7 +362,7 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
             (current_material_id >= static_cast<int>(materials.size()))) {
           // Invaid material ID. Use default material.
           current_material_id =
-              materials.size() -
+              int(materials.size()) -
               1;  // Default material is added to the last item in `materials`.
         }
         // if (current_material_id >= materials.size()) {
@@ -432,7 +372,7 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
         //
         float diffuse[3];
         for (size_t i = 0; i < 3; i++) {
-          diffuse[i] = materials[current_material_id].diffuse[i];
+          diffuse[i] = materials[size_t(current_material_id)].diffuse[i];
         }
         float tc[3][2];
         if (attrib.texcoords.size() > 0) {
@@ -454,12 +394,15 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
                    size_t(2 * idx2.texcoord_index + 1));
 
             // Flip Y coord.
-            tc[0][0] = attrib.texcoords[2 * idx0.texcoord_index];
-            tc[0][1] = 1.0f - attrib.texcoords[2 * idx0.texcoord_index + 1];
-            tc[1][0] = attrib.texcoords[2 * idx1.texcoord_index];
-            tc[1][1] = 1.0f - attrib.texcoords[2 * idx1.texcoord_index + 1];
-            tc[2][0] = attrib.texcoords[2 * idx2.texcoord_index];
-            tc[2][1] = 1.0f - attrib.texcoords[2 * idx2.texcoord_index + 1];
+            tc[0][0] = attrib.texcoords[2 * size_t(idx0.texcoord_index)];
+            tc[0][1] =
+                1.0f - attrib.texcoords[2 * size_t(idx0.texcoord_index) + 1];
+            tc[1][0] = attrib.texcoords[2 * size_t(idx1.texcoord_index)];
+            tc[1][1] =
+                1.0f - attrib.texcoords[2 * size_t(idx1.texcoord_index) + 1];
+            tc[2][0] = attrib.texcoords[2 * size_t(idx2.texcoord_index)];
+            tc[2][1] =
+                1.0f - attrib.texcoords[2 * size_t(idx2.texcoord_index) + 1];
           }
         } else {
           tc[0][0] = 0.0f;
@@ -471,7 +414,7 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
         }
 
         float v[3][3];
-        for (int k = 0; k < 3; k++) {
+        for (size_t k = 0; k < 3; k++) {
           int f0 = idx0.vertex_index;
           int f1 = idx1.vertex_index;
           int f2 = idx2.vertex_index;
@@ -479,9 +422,9 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
           assert(f1 >= 0);
           assert(f2 >= 0);
 
-          v[0][k] = attrib.vertices[3 * f0 + k];
-          v[1][k] = attrib.vertices[3 * f1 + k];
-          v[2][k] = attrib.vertices[3 * f2 + k];
+          v[0][k] = attrib.vertices[3 * size_t(f0) + k];
+          v[1][k] = attrib.vertices[3 * size_t(f1) + k];
+          v[2][k] = attrib.vertices[3 * size_t(f2) + k];
           bmin[k] = std::min(v[0][k], bmin[k]);
           bmin[k] = std::min(v[1][k], bmin[k]);
           bmin[k] = std::min(v[2][k], bmin[k]);
@@ -502,13 +445,13 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
               // normal index is missing from this face.
               invalid_normal_index = true;
             } else {
-              for (int k = 0; k < 3; k++) {
-                assert(size_t(3 * nf0 + k) < attrib.normals.size());
-                assert(size_t(3 * nf1 + k) < attrib.normals.size());
-                assert(size_t(3 * nf2 + k) < attrib.normals.size());
-                n[0][k] = attrib.normals[3 * nf0 + k];
-                n[1][k] = attrib.normals[3 * nf1 + k];
-                n[2][k] = attrib.normals[3 * nf2 + k];
+              for (size_t k = 0; k < 3; k++) {
+                assert(size_t(3 * nf0) + k < attrib.normals.size());
+                assert(size_t(3 * nf1) + k < attrib.normals.size());
+                assert(size_t(3 * nf2) + k < attrib.normals.size());
+                n[0][k] = attrib.normals[3 * size_t(nf0) + k];
+                n[1][k] = attrib.normals[3 * size_t(nf1) + k];
+                n[2][k] = attrib.normals[3 * size_t(nf2) + k];
               }
             }
           } else {
@@ -558,7 +501,7 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
           buffer.push_back(n[k][1]);
           buffer.push_back(n[k][2]);
           // Combine normal and diffuse to get color.
-          float normal_factor = 0.2;
+          float normal_factor = 0.2f;
           float diffuse_factor = 1 - normal_factor;
           float c[3] = {n[k][0] * normal_factor + diffuse[0] * diffuse_factor,
                         n[k][1] * normal_factor + diffuse[1] * diffuse_factor,
@@ -571,9 +514,9 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
             c[1] /= len;
             c[2] /= len;
           }
-          buffer.push_back(c[0] * 0.5 + 0.5);
-          buffer.push_back(c[1] * 0.5 + 0.5);
-          buffer.push_back(c[2] * 0.5 + 0.5);
+          buffer.push_back(c[0] * 0.5f + 0.5f);
+          buffer.push_back(c[1] * 0.5f + 0.5f);
+          buffer.push_back(c[2] * 0.5f + 0.5f);
 
           buffer.push_back(tc[k][0]);
           buffer.push_back(tc[k][1]);
@@ -589,17 +532,18 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
         o.material_id = shapes[s].mesh.material_ids[0];  // use the material ID
                                                          // of the first face.
       } else {
-        o.material_id = materials.size() - 1;  // = ID for default material.
+        o.material_id =
+            int(materials.size()) - 1;  // = ID for default material.
       }
       printf("shape[%d] material_id %d\n", int(s), int(o.material_id));
 
       if (buffer.size() > 0) {
         glGenBuffers(1, &o.vb_id);
         glBindBuffer(GL_ARRAY_BUFFER, o.vb_id);
-        glBufferData(GL_ARRAY_BUFFER, buffer.size() * sizeof(float),
+        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(buffer.size() * sizeof(float)),
                      &buffer.at(0), GL_STATIC_DRAW);
-        o.numTriangles = buffer.size() / (3 + 3 + 3 + 2) /
-                         3;  // 3:vtx, 3:normal, 3:col, 2:texcoord
+        o.numTriangles = int(buffer.size() / (3 + 3 + 3 + 2) /
+                             3);  // 3:vtx, 3:normal, 3:col, 2:texcoord
 
         printf("shape[%d] # of triangles = %d\n", static_cast<int>(s),
                o.numTriangles);
@@ -609,8 +553,10 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
     }
   }
 
-  printf("bmin = %f, %f, %f\n", bmin[0], bmin[1], bmin[2]);
-  printf("bmax = %f, %f, %f\n", bmax[0], bmax[1], bmax[2]);
+  std::cout << "bmin = " << bmin[0] << ", " << bmin[1] << ", " << bmin[2]
+            << "\n";
+  std::cout << "bmax = " << bmax[0] << ", " << bmax[1] << ", " << bmax[2]
+            << "\n";
 
   return true;
 }
@@ -623,12 +569,15 @@ static void reshapeFunc(GLFWwindow* window, int w, int h) {
   glViewport(0, 0, fb_w, fb_h);
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  gluPerspective(45.0, (float)w / (float)h, 0.01f, 100.0f);
+  gluPerspective(45.0, double(w) / double(h), 0.01, 100.0);
   glMatrixMode(GL_MODELVIEW);
   glLoadIdentity();
 
-  width = w;
-  height = h;
+  auto* param = reinterpret_cast<objlab::gui_parameters*>(
+      glfwGetWindowUserPointer(window));
+
+  param->width = w;
+  param->height = h;
 }
 
 static void keyboardFunc(GLFWwindow* window, int key, int scancode, int action,
@@ -637,6 +586,7 @@ static void keyboardFunc(GLFWwindow* window, int key, int scancode, int action,
   (void)scancode;
   (void)mods;
   if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+#if 0
     // Move camera
     float mv_x = 0, mv_y = 0, mv_z = 0;
     if (key == GLFW_KEY_K)
@@ -652,6 +602,7 @@ static void keyboardFunc(GLFWwindow* window, int key, int scancode, int action,
     else if (key == GLFW_KEY_N)
       mv_z += -1;
     // camera.move(mv_x * 0.05, mv_y * 0.05, mv_z * 0.05);
+#endif
     // Close window
     if (key == GLFW_KEY_Q || key == GLFW_KEY_ESCAPE)
       glfwSetWindowShouldClose(window, GL_TRUE);
@@ -661,60 +612,76 @@ static void keyboardFunc(GLFWwindow* window, int key, int scancode, int action,
 }
 
 static void clickFunc(GLFWwindow* window, int button, int action, int mods) {
-  (void)window;
   (void)mods;
+
+  auto* params = reinterpret_cast<objlab::gui_parameters*>(
+      glfwGetWindowUserPointer(window));
+
   if (button == GLFW_MOUSE_BUTTON_LEFT) {
     if (action == GLFW_PRESS) {
-      mouseLeftPressed = true;
-      trackball(prev_quat, 0.0, 0.0, 0.0, 0.0);
+      params->mouseLeftPressed = true;
+      trackball(params->prev_quat, 0.0, 0.0, 0.0, 0.0);
     } else if (action == GLFW_RELEASE) {
-      mouseLeftPressed = false;
+      params->mouseLeftPressed = false;
     }
   }
   if (button == GLFW_MOUSE_BUTTON_RIGHT) {
     if (action == GLFW_PRESS) {
-      mouseRightPressed = true;
+      params->mouseRightPressed = true;
     } else if (action == GLFW_RELEASE) {
-      mouseRightPressed = false;
+      params->mouseRightPressed = false;
     }
   }
   if (button == GLFW_MOUSE_BUTTON_MIDDLE) {
     if (action == GLFW_PRESS) {
-      mouseMiddlePressed = true;
+      params->mouseMiddlePressed = true;
     } else if (action == GLFW_RELEASE) {
-      mouseMiddlePressed = false;
+      params->mouseMiddlePressed = false;
     }
   }
 }
 
 static void motionFunc(GLFWwindow* window, double mouse_x, double mouse_y) {
-  (void)window;
   float rotScale = 1.0f;
   float transScale = 2.0f;
 
-  if (mouseLeftPressed) {
-    trackball(prev_quat, rotScale * (2.0f * prevMouseX - width) / (float)width,
-              rotScale * (height - 2.0f * prevMouseY) / (float)height,
-              rotScale * (2.0f * mouse_x - width) / (float)width,
-              rotScale * (height - 2.0f * mouse_y) / (float)height);
+  auto* params = reinterpret_cast<objlab::gui_parameters*>(
+      glfwGetWindowUserPointer(window));
 
-    add_quats(prev_quat, curr_quat, curr_quat);
-  } else if (mouseMiddlePressed) {
-    eye[0] -= transScale * (mouse_x - prevMouseX) / (float)width;
-    lookat[0] -= transScale * (mouse_x - prevMouseX) / (float)width;
-    eye[1] += transScale * (mouse_y - prevMouseY) / (float)height;
-    lookat[1] += transScale * (mouse_y - prevMouseY) / (float)height;
-  } else if (mouseRightPressed) {
-    eye[2] += transScale * (mouse_y - prevMouseY) / (float)height;
-    lookat[2] += transScale * (mouse_y - prevMouseY) / (float)height;
+  if (params->mouseLeftPressed) {
+    trackball(
+        params->prev_quat,
+        rotScale * (2.0f * params->prevMouseX - params->width) /
+            float(params->width),
+        rotScale*(params->height - 2.0f * params->prevMouseY) /
+            float(params->height),
+        rotScale*(2.0f * float(mouse_x) - params->width) / float(params->width),
+        rotScale*(params->height - 2.0f * float(mouse_y)) /
+            float(params->height));
+
+    add_quats(params->prev_quat, params->curr_quat, params->curr_quat);
+  } else if (params->mouseMiddlePressed) {
+    params->eye[0] -= transScale * (float(mouse_x) - params->prevMouseX) /
+                      float(params->width);
+    params->lookat[0] -= transScale * (float(mouse_x) - params->prevMouseX) /
+                         float(params->width);
+    params->eye[1] += transScale * (float(mouse_y) - params->prevMouseY) /
+                      float(params->height);
+    params->lookat[1] += transScale * (float(mouse_y) - params->prevMouseY) /
+                         float(params->height);
+  } else if (params->mouseRightPressed) {
+    params->eye[2] += transScale * (float(mouse_y) - params->prevMouseY) /
+                      float(params->height);
+    params->lookat[2] += transScale * (float(mouse_y) - params->prevMouseY) /
+                         float(params->height);
   }
 
   // Update mouse point
-  prevMouseX = mouse_x;
-  prevMouseY = mouse_y;
+  params->prevMouseX = float(mouse_x);
+  params->prevMouseY = float(mouse_y);
 }
 
-static void Draw(const std::vector<DrawObject>& drawObjects,
+static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
                  std::vector<tinyobj::material_t>& materials,
                  std::map<std::string, GLuint>& textures) {
   glPolygonMode(GL_FRONT, GL_FILL);
@@ -724,7 +691,7 @@ static void Draw(const std::vector<DrawObject>& drawObjects,
   glPolygonOffset(1.0, 1.0);
   GLsizei stride = (3 + 3 + 3 + 2) * sizeof(float);
   for (size_t i = 0; i < drawObjects.size(); i++) {
-    DrawObject o = drawObjects[i];
+    objlab::DrawObject o = drawObjects[i];
     if (o.vb_id < 1) {
       continue;
     }
@@ -736,17 +703,24 @@ static void Draw(const std::vector<DrawObject>& drawObjects,
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    if ((o.material_id < materials.size())) {
-      std::string diffuse_texname = materials[o.material_id].diffuse_texname;
+    if ((o.material_id >= 0) && (o.material_id < int(materials.size()))) {
+      std::string diffuse_texname =
+          materials[size_t(o.material_id)].diffuse_texname;
       if (textures.find(diffuse_texname) != textures.end()) {
         glBindTexture(GL_TEXTURE_2D, textures[diffuse_texname]);
       }
     }
-    glVertexPointer(3, GL_FLOAT, stride, (const void*)0);
-    glNormalPointer(GL_FLOAT, stride, (const void*)(sizeof(float) * 3));
-    glColorPointer(3, GL_FLOAT, stride, (const void*)(sizeof(float) * 6));
-    glTexCoordPointer(2, GL_FLOAT, stride, (const void*)(sizeof(float) * 9));
-
+    glVertexPointer(3, GL_FLOAT, stride, nullptr);
+    // https://stackoverflow.com/questions/23177229/how-to-cast-int-to-const-glvoid
+    glNormalPointer(
+        GL_FLOAT, stride,
+        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 3)));
+    glColorPointer(
+        3, GL_FLOAT, stride,
+        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 6)));
+    glTexCoordPointer(
+        2, GL_FLOAT, stride,
+        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
     glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
     CheckErrors("drawarrays");
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -759,7 +733,7 @@ static void Draw(const std::vector<DrawObject>& drawObjects,
 
   glColor3f(0.0f, 0.0f, 0.4f);
   for (size_t i = 0; i < drawObjects.size(); i++) {
-    DrawObject o = drawObjects[i];
+    objlab::DrawObject o = drawObjects[i];
     if (o.vb_id < 1) {
       continue;
     }
@@ -769,47 +743,64 @@ static void Draw(const std::vector<DrawObject>& drawObjects,
     glEnableClientState(GL_NORMAL_ARRAY);
     glDisableClientState(GL_COLOR_ARRAY);
     glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-    glVertexPointer(3, GL_FLOAT, stride, (const void*)0);
-    glNormalPointer(GL_FLOAT, stride, (const void*)(sizeof(float) * 3));
-    glColorPointer(3, GL_FLOAT, stride, (const void*)(sizeof(float) * 6));
-    glTexCoordPointer(2, GL_FLOAT, stride, (const void*)(sizeof(float) * 9));
+    glVertexPointer(3, GL_FLOAT, stride, nullptr);
+    glNormalPointer(
+        GL_FLOAT, stride,
+        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 3)));
+    glColorPointer(
+        3, GL_FLOAT, stride,
+        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 6)));
+    glTexCoordPointer(
+        2, GL_FLOAT, stride,
+        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
 
     glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
     CheckErrors("drawarrays");
   }
 }
 
-static void Init() {
-  trackball(curr_quat, 0, 0, 0, 0);
+static void Init(objlab::gui_parameters* params) {
+  trackball(params->curr_quat, 0, 0, 0, 0);
 
-  eye[0] = 0.0f;
-  eye[1] = 0.0f;
-  eye[2] = 3.0f;
+  params->eye[0] = 0.0f;
+  params->eye[1] = 0.0f;
+  params->eye[2] = 3.0f;
 
-  lookat[0] = 0.0f;
-  lookat[1] = 0.0f;
-  lookat[2] = 0.0f;
+  params->lookat[0] = 0.0f;
+  params->lookat[1] = 0.0f;
+  params->lookat[2] = 0.0f;
 
-  up[0] = 0.0f;
-  up[1] = 1.0f;
-  up[2] = 0.0f;
+  params->up[0] = 0.0f;
+  params->up[1] = 1.0f;
+  params->up[2] = 0.0f;
 }
 
 int main(int argc, char** argv) {
+  std::string obj_filename = "../models/cornell_box.obj";
+
   if (argc < 2) {
     std::cout << "Needs input.obj\n" << std::endl;
-    return 0;
+    std::cout << "  Use default value: " << obj_filename << "\n";
   }
 
-  Init();
+  if (argc > 1) {
+    obj_filename = argv[1];
+  }
+
+  objlab::gui_parameters gui_params;
+
+  Init(&gui_params);
 
   if (!glfwInit()) {
     std::cerr << "Failed to initialize GLFW." << std::endl;
     return -1;
   }
 
-  window = glfwCreateWindow(width, height, "Obj viewer", NULL, NULL);
-  if (window == NULL) {
+  glfwSetErrorCallback(glfw_error_callback);
+
+  GLFWwindow* window = glfwCreateWindow(gui_params.width, gui_params.height,
+                                        "Obj viewer", nullptr, nullptr);
+  if (window == nullptr) {
     std::cerr << "Failed to open GLFW window. " << std::endl;
     glfwTerminate();
     return 1;
@@ -818,24 +809,28 @@ int main(int argc, char** argv) {
   glfwMakeContextCurrent(window);
   glfwSwapInterval(1);
 
+  glfwSetWindowUserPointer(window, &gui_params);
+
   // Callback
   glfwSetWindowSizeCallback(window, reshapeFunc);
   glfwSetKeyCallback(window, keyboardFunc);
   glfwSetMouseButtonCallback(window, clickFunc);
   glfwSetCursorPosCallback(window, motionFunc);
 
-  if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
+  if (!gladLoadGLLoader(reinterpret_cast<GLADloadproc>(glfwGetProcAddress))) {
     std::cerr << "Failed to initialize GLAD.\n";
     return -1;
   }
 
-  reshapeFunc(window, width, height);
+  reshapeFunc(window, gui_params.width, gui_params.height);
+
+  objlab::DrawContext draw_ctx;
 
   float bmin[3], bmax[3];
   std::vector<tinyobj::material_t> materials;
   std::map<std::string, GLuint> textures;
-  if (false == LoadObjAndConvert(bmin, bmax, &gDrawObjects, materials, textures,
-                                 argv[1])) {
+  if (false == LoadObjAndConvert(bmin, bmax, &draw_ctx.draw_objects, materials,
+                                 textures, obj_filename.c_str())) {
     return -1;
   }
 
@@ -859,19 +854,20 @@ int main(int argc, char** argv) {
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     GLfloat mat[4][4];
-    gluLookAt(eye[0], eye[1], eye[2], lookat[0], lookat[1], lookat[2], up[0],
-              up[1], up[2]);
-    build_rotmatrix(mat, curr_quat);
+    gluLookAt(double(gui_params.eye[0]), double(gui_params.eye[1]), double(gui_params.eye[2]),
+              double(gui_params.lookat[0]), double(gui_params.lookat[1]), double(gui_params.lookat[2]),
+              double(gui_params.up[0]), double(gui_params.up[1]), double(gui_params.up[2]));
+    build_rotmatrix(mat, gui_params.curr_quat);
     glMultMatrixf(&mat[0][0]);
 
     // Fit to -1, 1
     glScalef(1.0f / maxExtent, 1.0f / maxExtent, 1.0f / maxExtent);
 
     // Centerize object.
-    glTranslatef(-0.5 * (bmax[0] + bmin[0]), -0.5 * (bmax[1] + bmin[1]),
-                 -0.5 * (bmax[2] + bmin[2]));
+    glTranslatef(-0.5f * (bmax[0] + bmin[0]), -0.5f * (bmax[1] + bmin[1]),
+                 -0.5f * (bmax[2] + bmin[2]));
 
-    Draw(gDrawObjects, materials, textures);
+    Draw(draw_ctx.draw_objects, materials, textures);
 
     glfwSwapBuffers(window);
   }
