@@ -69,7 +69,10 @@ namespace fs = ghc::filesystem;
 
 #include "app.hh"
 #include "draw-context.hh"
-#include "gui-params.hh"
+#include "gui-window.hh"
+#include "mesh.hh"
+#include "params.hh"
+#include "face-sorter.hh"
 
 static void glfw_error_callback(int error, const char* description) {
   fprintf(stderr, "Glfw Error %d: %s\n", error, description);
@@ -219,12 +222,15 @@ void ComputeSmoothingNormals(const tinyobj::attrib_t& attrib,
 }  // namespace
 
 static bool LoadObjAndConvert(float bmin[3], float bmax[3],
+                              std::vector<objlab::Mesh>* meshes,
                               std::vector<objlab::DrawObject>* drawObjects,
                               std::vector<tinyobj::material_t>& materials,
                               std::map<std::string, GLuint>& textures,
                               const char* filename) {
   tinyobj::attrib_t attrib;
   std::vector<tinyobj::shape_t> shapes;
+
+  meshes->clear();
 
   auto start_time = std::chrono::system_clock::now();
 
@@ -335,6 +341,8 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
     for (size_t s = 0; s < shapes.size(); s++) {
       objlab::DrawObject o;
       std::vector<float> buffer;  // pos(3float), normal(3float), color(3float)
+
+      objlab::Mesh mesh;
 
       // Check for smoothing group and compute smoothing normals
       std::map<int, vec3> smoothVertexNormals;
@@ -513,7 +521,30 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
 
           buffer.push_back(tc[k][0]);
           buffer.push_back(tc[k][1]);
+
+          mesh.vertices.push_back(v[k][0]);
+          mesh.vertices.push_back(v[k][1]);
+          mesh.vertices.push_back(v[k][2]);
+
+          // facevarying normals/texcoords
+          mesh.normals.push_back(n[k][0]);
+          mesh.normals.push_back(n[k][1]);
+          mesh.normals.push_back(n[k][2]);
+
+          mesh.texcoords.push_back(tc[k][0]);
+          mesh.texcoords.push_back(tc[k][1]);
+
+          mesh.indices.push_back(3 * uint32_t(f) + 0);
+          mesh.indices.push_back(3 * uint32_t(f) + 1);
+          mesh.indices.push_back(3 * uint32_t(f) + 2);
+
+          // indices for OpenGL draw.
+          o.indices.push_back(3 * uint32_t(f) + 0);
+          o.indices.push_back(3 * uint32_t(f) + 1);
+          o.indices.push_back(3 * uint32_t(f) + 2);
         }
+
+        mesh.num_verts_per_faces.push_back(3);  // triangle
       }
 
       o.vb_id = 0;
@@ -543,7 +574,10 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
                o.numTriangles);
       }
 
+      mesh.draw_object_id = int(drawObjects->size());
+
       drawObjects->push_back(o);
+      meshes->push_back(mesh);
     }
   }
 
@@ -553,6 +587,18 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
             << "\n";
 
   return true;
+}
+
+static void ChangeTextureParameter(
+    const std::map<std::string, GLuint>& textures,
+    const objlab::gui_parameters& params) {
+  for (const auto& item : textures) {
+    glBindTexture(GL_TEXTURE_2D, item.second);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, params.texture_wrap_s);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, params.texture_wrap_t);
+  }
+
+  glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 static void reshapeFunc(GLFWwindow* window, int w, int h) {
@@ -650,32 +696,34 @@ static void motionFunc(GLFWwindow* window, double mouse_x, double mouse_y) {
   auto* params = reinterpret_cast<objlab::gui_parameters*>(
       glfwGetWindowUserPointer(window));
 
-  if (params->mouseLeftPressed) {
-    trackball(
-        params->prev_quat,
-        rotScale * (2.0f * params->prevMouseX - params->width) /
-            float(params->width),
-        rotScale*(params->height - 2.0f * params->prevMouseY) /
-            float(params->height),
-        rotScale*(2.0f * float(mouse_x) - params->width) / float(params->width),
-        rotScale*(params->height - 2.0f * float(mouse_y)) /
-            float(params->height));
+  if (!ImGui::GetIO().WantCaptureMouse) {
+    if (params->mouseLeftPressed) {
+      trackball(params->prev_quat,
+                rotScale * (2.0f * params->prevMouseX - params->width) /
+                    float(params->width),
+                rotScale*(params->height - 2.0f * params->prevMouseY) /
+                    float(params->height),
+                rotScale*(2.0f * float(mouse_x) - params->width) /
+                    float(params->width),
+                rotScale*(params->height - 2.0f * float(mouse_y)) /
+                    float(params->height));
 
-    add_quats(params->prev_quat, params->curr_quat, params->curr_quat);
-  } else if (params->mouseMiddlePressed) {
-    params->eye[0] -= transScale * (float(mouse_x) - params->prevMouseX) /
-                      float(params->width);
-    params->lookat[0] -= transScale * (float(mouse_x) - params->prevMouseX) /
-                         float(params->width);
-    params->eye[1] += transScale * (float(mouse_y) - params->prevMouseY) /
-                      float(params->height);
-    params->lookat[1] += transScale * (float(mouse_y) - params->prevMouseY) /
-                         float(params->height);
-  } else if (params->mouseRightPressed) {
-    params->eye[2] += transScale * (float(mouse_y) - params->prevMouseY) /
-                      float(params->height);
-    params->lookat[2] += transScale * (float(mouse_y) - params->prevMouseY) /
-                         float(params->height);
+      add_quats(params->prev_quat, params->curr_quat, params->curr_quat);
+    } else if (params->mouseMiddlePressed) {
+      params->eye[0] -= transScale * (float(mouse_x) - params->prevMouseX) /
+                        float(params->width);
+      params->lookat[0] -= transScale * (float(mouse_x) - params->prevMouseX) /
+                           float(params->width);
+      params->eye[1] += transScale * (float(mouse_y) - params->prevMouseY) /
+                        float(params->height);
+      params->lookat[1] += transScale * (float(mouse_y) - params->prevMouseY) /
+                           float(params->height);
+    } else if (params->mouseRightPressed) {
+      params->eye[2] += transScale * (float(mouse_y) - params->prevMouseY) /
+                        float(params->height);
+      params->lookat[2] += transScale * (float(mouse_y) - params->prevMouseY) /
+                           float(params->height);
+    }
   }
 
   // Update mouse point
@@ -684,8 +732,9 @@ static void motionFunc(GLFWwindow* window, double mouse_x, double mouse_y) {
 }
 
 static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
-                 std::vector<tinyobj::material_t>& materials,
-                 std::map<std::string, GLuint>& textures) {
+                 const std::vector<tinyobj::material_t>& materials,
+                 const std::map<std::string, GLuint>& textures,
+                 bool draw_wireframe) {
   glPolygonMode(GL_FRONT, GL_FILL);
   glPolygonMode(GL_BACK, GL_FILL);
 
@@ -709,7 +758,7 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
       std::string diffuse_texname =
           materials[size_t(o.material_id)].diffuse_texname;
       if (textures.find(diffuse_texname) != textures.end()) {
-        glBindTexture(GL_TEXTURE_2D, textures[diffuse_texname]);
+        glBindTexture(GL_TEXTURE_2D, textures.at(diffuse_texname));
       }
     }
     glVertexPointer(3, GL_FLOAT, stride, nullptr);
@@ -723,41 +772,46 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
     glTexCoordPointer(
         2, GL_FLOAT, stride,
         reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
-    glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
-    CheckGLErrors("drawarrays");
+    //glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
+    // TODO(LTE): index bufer.
+    glDrawElements(GL_TRIANGLES, GLsizei(o.indices.size()), GL_UNSIGNED_INT, o.indices.data());
+    CheckGLErrors("drawelements");
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
-  // draw wireframe
-  glDisable(GL_POLYGON_OFFSET_FILL);
-  glPolygonMode(GL_FRONT, GL_LINE);
-  glPolygonMode(GL_BACK, GL_LINE);
+  if (draw_wireframe) {
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glPolygonMode(GL_FRONT, GL_LINE);
+    glPolygonMode(GL_BACK, GL_LINE);
 
-  glColor3f(0.0f, 0.0f, 0.4f);
-  for (size_t i = 0; i < drawObjects.size(); i++) {
-    objlab::DrawObject o = drawObjects[i];
-    if (o.vb_id < 1) {
-      continue;
+    glColor3f(0.0f, 0.0f, 0.4f);
+    for (size_t i = 0; i < drawObjects.size(); i++) {
+      objlab::DrawObject o = drawObjects[i];
+      if (o.vb_id < 1) {
+        continue;
+      }
+
+      glBindBuffer(GL_ARRAY_BUFFER, o.vb_id);
+      glEnableClientState(GL_VERTEX_ARRAY);
+      glEnableClientState(GL_NORMAL_ARRAY);
+      glDisableClientState(GL_COLOR_ARRAY);
+      glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+      glVertexPointer(3, GL_FLOAT, stride, nullptr);
+      glNormalPointer(
+          GL_FLOAT, stride,
+          reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 3)));
+      glColorPointer(
+          3, GL_FLOAT, stride,
+          reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 6)));
+      glTexCoordPointer(
+          2, GL_FLOAT, stride,
+          reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
+
+      //glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
+      // TODO(LTE): index bufer.
+      glDrawElements(GL_TRIANGLES, GLsizei(o.indices.size()), GL_UNSIGNED_INT, o.indices.data());
+      CheckGLErrors("drawarrays");
     }
-
-    glBindBuffer(GL_ARRAY_BUFFER, o.vb_id);
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glEnableClientState(GL_NORMAL_ARRAY);
-    glDisableClientState(GL_COLOR_ARRAY);
-    glDisableClientState(GL_TEXTURE_COORD_ARRAY);
-    glVertexPointer(3, GL_FLOAT, stride, nullptr);
-    glNormalPointer(
-        GL_FLOAT, stride,
-        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 3)));
-    glColorPointer(
-        3, GL_FLOAT, stride,
-        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 6)));
-    glTexCoordPointer(
-        2, GL_FLOAT, stride,
-        reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
-
-    glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
-    CheckGLErrors("drawarrays");
   }
 }
 
@@ -786,18 +840,21 @@ void gui_new_frame() {
   ImGui::NewFrame();
 }
 
-void gl_new_frame(GLFWwindow* window, ImVec4 clear_color, int* display_w,
+void gl_new_frame(GLFWwindow* window, ImVec4 clear_color, bool depth_test, int* display_w,
                   int* display_h) {
   // Rendering
   glfwGetFramebufferSize(window, display_w, display_h);
   glViewport(0, 0, *display_w, *display_h);
   glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
-  glEnable(GL_DEPTH_TEST);
+  if (depth_test) {
+    glEnable(GL_DEPTH_TEST);
+  } else {
+    glDisable(GL_DEPTH_TEST);
+  }
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
 void gl_gui_end_frame(GLFWwindow* window) {
-
   ImGuiIO& io = ImGui::GetIO();
 
   // glUseProgram(0);
@@ -849,16 +906,13 @@ static void initialize_imgui(GLFWwindow* window) {
   ImGui::CreateContext();
   auto& io = ImGui::GetIO();
 
-#if 0
   // Read .ini file from parent directory if imgui.ini does not exist in the
   // current directory.
   if (fs::exists("../imgui.ini") && !fs::exists("./imgui.ini")) {
     std::cout << "Use ../imgui.ini as Init file.\n";
     io.IniFilename = "../imgui.ini";
   }
-#endif
 
-#if 0
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
@@ -892,7 +946,6 @@ static void initialize_imgui(GLFWwindow* window) {
   io.Fonts->AddFontFromMemoryCompressedTTF(
       ionicons_compressed_data, ionicons_compressed_size, default_font_scale,
       &ionicons_config, icon_ranges);
-#endif
 
   ImGui::StyleColorsDark();
 
@@ -1150,6 +1203,68 @@ void EditTransform(const float* cameraView, float* cameraProjection,
       boundSizing ? bounds : nullptr, boundSizingSnap ? boundsSnap : nullptr);
 }
 
+void SortIndices(const std::vector<objlab::Mesh> &meshes,
+  std::vector<objlab::DrawObject> *draw_objects,
+  const float view_origin[3], const float view_dir[3])
+{
+  auto start_time = std::chrono::system_clock::now();
+
+  for (const auto &mesh : meshes) {
+    std::cout << "---------------" << "\n";
+
+    // Assume all triangle mesh.
+    assert((mesh.indices.size() % 3) == 0);
+
+    std::vector<uint32_t> sorted_face_indices;
+
+    //for (size_t i = 0; i < mesh.indices.size(); i++) {
+    //  std::cout << "indices = " << mesh.indices[i] << "\n";
+    //}
+
+    face_sorter::TriangleFaceCenterAccessor<float> fa(mesh.vertices.data(), mesh.indices.data(), mesh.indices.size() / 3);
+
+    std::cout << "view_org = " << view_origin[0] << ", " << view_origin[1] << ", " << view_origin[2] << "\n";
+    std::cout << "view_dir = " << view_dir[0] << ", " << view_dir[1] << ", " << view_dir[2] << "\n";
+
+    face_sorter::SortByBarycentricZ<float>(mesh.indices.size() / 3, view_origin, view_dir, fa, &sorted_face_indices);
+
+    std::cout << "sorted_face_indices = " << sorted_face_indices.size() << "\n";
+    std::cout << "mesh.indices = " << mesh.indices.size() << "\n";
+
+    int32_t draw_object_id = mesh.draw_object_id;
+    assert(draw_object_id >= 0);
+
+    // reorder vetex indices.
+    std::vector<uint32_t> sorted_indices;
+    for (size_t i = 0; i < sorted_face_indices.size(); i++) {
+      size_t idx = sorted_face_indices[i];
+
+      uint32_t f0 = mesh.indices[3 * idx + 0];
+      uint32_t f1 = mesh.indices[3 * idx + 1];
+      uint32_t f2 = mesh.indices[3 * idx + 2];
+
+      sorted_indices.push_back(f0);
+      sorted_indices.push_back(f1);
+      sorted_indices.push_back(f2);
+      // std::cout << "sort = " << f0 << ", " << f1 << ", " << f2 << "\n";
+    }
+
+    objlab::DrawObject &o = (*draw_objects)[size_t(draw_object_id)];
+
+    assert(sorted_indices.size() == o.indices.size());
+
+    // update indices
+    o.indices = sorted_indices;
+
+  }
+
+  auto end_time = std::chrono::system_clock::now();
+
+  std::chrono::duration<double, std::milli> ms = end_time - start_time;
+
+  std::cout << "Sort time: " << ms.count() << " [ms]\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1193,7 +1308,6 @@ int main(int argc, char** argv) {
     //glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // 3.0+ only
 #endif
 #endif
-
 
   GLFWwindow* window = glfwCreateWindow(gui_params.width, gui_params.height,
                                         "Obj viewer", nullptr, nullptr);
@@ -1240,8 +1354,10 @@ int main(int argc, char** argv) {
   float bmin[3], bmax[3];
   std::vector<tinyobj::material_t> materials;
   std::map<std::string, GLuint> textures;
-  if (false == LoadObjAndConvert(bmin, bmax, &draw_ctx.draw_objects, materials,
-                                 textures, obj_filename.c_str())) {
+  std::vector<objlab::Mesh> meshes;
+
+  if (false == LoadObjAndConvert(bmin, bmax, &meshes, &draw_ctx.draw_objects,
+                                 materials, textures, obj_filename.c_str())) {
     return -1;
   }
 
@@ -1252,8 +1368,6 @@ int main(int argc, char** argv) {
   if (maxExtent < 0.5f * (bmax[2] - bmin[2])) {
     maxExtent = 0.5f * (bmax[2] - bmin[2]);
   }
-
-  ImVec4 background_color = {0.1F, 0.15F, 0.2F, 1.0F};
 
   float objectMatrix[16] = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f,
                             0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
@@ -1352,32 +1466,80 @@ int main(int argc, char** argv) {
                              ImVec2(128, 128), 0x10101010);
 #endif
 
-    gl_new_frame(window, background_color, &display_w, &display_h);
+    {
+      bool texparam_changed = false;
+      bool sort_pressed = false;
+      if (alpha_window(&gui_params, &texparam_changed, &sort_pressed)) {
+        if (sort_pressed) {
+          SortIndices(meshes, &draw_ctx.draw_objects, gui_params.alpha_view_origin, gui_params.alpha_view_dir);
+        }
 
-    glEnable(GL_TEXTURE_2D);
+        if (texparam_changed) {
+          ChangeTextureParameter(textures, gui_params);
+        }
+      }
+    }
+
+    if (render_window(&gui_params)) {
+    }
+
+    ImVec4 background_color = {gui_params.background_color[0],
+                               gui_params.background_color[1],
+                               gui_params.background_color[2], 1.0f};
+    gl_new_frame(window, background_color, gui_params.enable_depth_test, &display_w, &display_h);
+
+    {
+      glEnable(GL_TEXTURE_2D);
+
+      if (gui_params.enable_alpha_texturing) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_CULL_FACE);
+      } else {
+        glDisable(GL_BLEND);
+
+        if (gui_params.enable_depth_test) {
+          glEnable(GL_DEPTH_TEST);
+        } else {
+          glDisable(GL_DEPTH_TEST);
+        }
+
+        if (gui_params.enable_cull_face) {
+          glEnable(GL_CULL_FACE);
+        } else {
+          glDisable(GL_CULL_FACE);
+        }
+      }
 
 #if 1
-    // camera & rotate
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-    GLfloat mat[4][4];
-    gluLookAt(double(gui_params.eye[0]), double(gui_params.eye[1]),
-              double(gui_params.eye[2]), double(gui_params.lookat[0]),
-              double(gui_params.lookat[1]), double(gui_params.lookat[2]),
-              double(gui_params.up[0]), double(gui_params.up[1]),
-              double(gui_params.up[2]));
-    build_rotmatrix(mat, gui_params.curr_quat);
-    glMultMatrixf(&mat[0][0]);
+      // camera & rotate
+      glMatrixMode(GL_MODELVIEW);
+      glLoadIdentity();
+      GLfloat mat[4][4];
+      gluLookAt(double(gui_params.eye[0]), double(gui_params.eye[1]),
+                double(gui_params.eye[2]), double(gui_params.lookat[0]),
+                double(gui_params.lookat[1]), double(gui_params.lookat[2]),
+                double(gui_params.up[0]), double(gui_params.up[1]),
+                double(gui_params.up[2]));
+      build_rotmatrix(mat, gui_params.curr_quat);
+      glMultMatrixf(&mat[0][0]);
 #endif
 
-    // Fit to -1, 1
-    glScalef(1.0f / maxExtent, 1.0f / maxExtent, 1.0f / maxExtent);
+      // Fit to -1, 1
+      glScalef(1.0f / maxExtent, 1.0f / maxExtent, 1.0f / maxExtent);
 
-    // Centerize object.
-    glTranslatef(-0.5f * (bmax[0] + bmin[0]), -0.5f * (bmax[1] + bmin[1]),
-                 -0.5f * (bmax[2] + bmin[2]));
+      // Centerize object.
+      glTranslatef(-0.5f * (bmax[0] + bmin[0]), -0.5f * (bmax[1] + bmin[1]),
+                   -0.5f * (bmax[2] + bmin[2]));
 
-    Draw(draw_ctx.draw_objects, materials, textures);
+      Draw(draw_ctx.draw_objects, materials, textures,
+           gui_params.draw_wireframe);
+
+      glEnable(GL_DEPTH_TEST);
+      glEnable(GL_CULL_FACE);
+      glDisable(GL_TEXTURE_2D);
+    }
 
     gl_gui_end_frame(window);
   }

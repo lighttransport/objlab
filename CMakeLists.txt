@@ -4,9 +4,13 @@ set(BUILD_TARGET "objlab")
 
 project(${BUILD_TARGET})
 
-find_package(OpenGL REQUIRED)
-
+# cmake modules
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
+# list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/sanitizers)
+find_package(Sanitizers) # Address sanitizer (-DSANITIZE_ADDRESS=ON)
 set(CMAKE_CXX_STANDARD 11)
+
+find_package(OpenGL REQUIRED)
 
 # [glfw3]
 set(GLFW_BUILD_EXAMPLES OFF CACHE INTERNAL "" FORCE)
@@ -17,6 +21,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glfw)
 
 set(OBJLAB_SOURCES
     src/app.cc
+    src/face-sorter.cc
+    src/gui-window.cc
     src/main.cc
     )
 
@@ -33,6 +39,7 @@ set(OBJLAB_DEP_SOURCES
     )
 
 add_executable(${BUILD_TARGET} ${OBJLAB_SOURCES} ${OBJLAB_DEP_SOURCES})
+add_sanitizers(${BUILD_TARGET})
 
 # [filesytem]
 target_include_directories(${BUILD_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/filesystem/include")
