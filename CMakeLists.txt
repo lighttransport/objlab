@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 
 set(BUILD_TARGET "objlab")
 
-project(${BUILD_TARGET})
+project(${BUILD_TARGET} C CXX)
 
 # cmake modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
@@ -28,7 +28,6 @@ set(OBJLAB_SOURCES
     )
 
 set(OBJLAB_DEP_SOURCES
-    #src/glad.c
     src/trackball.cc
     deps/glad/src/glad.c
     deps/imgui/imgui.cpp

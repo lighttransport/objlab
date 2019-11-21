@@ -14,6 +14,12 @@
 
 #include <chrono>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#endif
+
 #ifdef __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
@@ -1398,7 +1404,11 @@ void SortIndices(std::vector<objlab::Mesh>& meshes, // [inout]
 }  // namespace
 
 int main(int argc, char** argv) {
+#if defined(_MSC_VER)
+	std::string obj_filename = "../../../models/cornell_box.obj";
+#else
   std::string obj_filename = "../models/cornell_box.obj";
+#endif
 
   if (argc < 2) {
     std::cout << "Needs input.obj\n" << std::endl;
