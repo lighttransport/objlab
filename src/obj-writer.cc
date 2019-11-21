@@ -29,12 +29,16 @@ bool SaveMeshAsObj(const std::vector<Mesh> &meshes, const std::string &base_file
   bool has_normals = (mesh.normals.size() > 0) ? true : false;
   bool has_uvs = (mesh.texcoords.size() > 0) ? true : false;
 
+  std::cout << "# of vertices = " << mesh.vertices.size() / 3 << "\n";
+  std::cout << "# of normals = " << mesh.normals.size() / 3 << "\n";
+  std::cout << "# of texcoords = " << mesh.texcoords.size() / 2 << "\n";
+
   for (size_t i = 0; i < mesh.vertices.size() / 3; i++) {
     ofs << "v " << mesh.vertices[3 * i + 0] << ", " << mesh.vertices[3 * i + 1] << ", " << mesh.vertices[3 * i + 2] << "\n";
   }
 
   for (size_t i = 0; i < mesh.normals.size() / 3; i++) {
-    ofs << "v " << mesh.normals[3 * i + 0] << ", " << mesh.normals[3 * i + 1] << ", " << mesh.normals[3 * i + 2] << "\n";
+    ofs << "vn " << mesh.normals[3 * i + 0] << ", " << mesh.normals[3 * i + 1] << ", " << mesh.normals[3 * i + 2] << "\n";
   }
 
   for (size_t i = 0; i < mesh.texcoords.size() / 2; i++) {
@@ -44,10 +48,8 @@ bool SaveMeshAsObj(const std::vector<Mesh> &meshes, const std::string &base_file
 
   size_t idx_offset = 0;
   for (size_t i = 0; i < mesh.num_verts_per_faces.size(); i++) {
-    std::cout << "n " << i << "/" << mesh.num_verts_per_faces.size() << "\n";
     ofs << "f";
     for (size_t v = 0; v < mesh.num_verts_per_faces[i]; v++) {
-      std::cout << "i = " << i << ", indices.len = "  << mesh.indices.size() << ", offt = " << idx_offset << "\n";
 
       // obj face start with 1.
       size_t idx = mesh.indices[idx_offset + v] + 1;
