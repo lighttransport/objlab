@@ -69,10 +69,12 @@ namespace fs = ghc::filesystem;
 
 #include "app.hh"
 #include "draw-context.hh"
+#include "face-sorter.hh"
 #include "gui-window.hh"
 #include "mesh.hh"
 #include "params.hh"
-#include "face-sorter.hh"
+#include "texture.hh"
+#include "obj-writer.hh"
 
 static void glfw_error_callback(int error, const char* description) {
   fprintf(stderr, "Glfw Error %d: %s\n", error, description);
@@ -221,12 +223,14 @@ void ComputeSmoothingNormals(const tinyobj::attrib_t& attrib,
 
 }  // namespace
 
-static bool LoadObjAndConvert(float bmin[3], float bmax[3],
-                              std::vector<objlab::Mesh>* meshes,
-                              std::vector<objlab::DrawObject>* drawObjects,
-                              std::vector<tinyobj::material_t>& materials,
-                              std::map<std::string, GLuint>& textures,
-                              const char* filename) {
+static bool LoadObjAndConvert(
+    float bmin[3], float bmax[3],
+    std::vector<objlab::Mesh>* meshes,                 // out
+    std::vector<objlab::DrawObject>* drawObjects,      // out
+    std::vector<tinyobj::material_t>& materials,       // out
+    std::map<std::string, objlab::Texture>& textures,  // out
+    std::vector<objlab::Image>& images,                // out
+    const char* filename) {
   tinyobj::attrib_t attrib;
   std::vector<tinyobj::shape_t> shapes;
 
@@ -278,12 +282,57 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
   for (size_t i = 0; i < materials.size(); i++) {
     printf("material[%d].diffuse_texname = %s\n", int(i),
            materials[i].diffuse_texname.c_str());
+    printf("material[%d].alpha_texname = %s\n", int(i),
+           materials[i].alpha_texname.c_str());
   }
 
   // Load diffuse textures
   {
     for (size_t m = 0; m < materials.size(); m++) {
       tinyobj::material_t* mp = &materials[m];
+
+      bool has_alpha = false;
+      int alpha_w = 0, alpha_h = 0;
+      std::vector<uint8_t> alpha_image;
+
+      if (!(mp->alpha_texname.empty())) {
+        int comp;
+
+        std::string texture_filename = mp->alpha_texname;
+        if (!FileExists(texture_filename)) {
+          // Append base dir.
+          texture_filename = base_dir + mp->alpha_texname;
+          if (!FileExists(texture_filename)) {
+            std::cerr << "Unable to find file: " << mp->alpha_texname
+                      << std::endl;
+            exit(1);
+          }
+        }
+
+        unsigned char* image_data =
+            stbi_load(texture_filename.c_str(), &alpha_w, &alpha_h, &comp,
+                      STBI_default);
+        if (!image_data) {
+          std::cerr << "Unable to load texture: " << texture_filename
+                    << std::endl;
+          exit(1);
+        }
+
+        if (comp != 1) {
+          std::cerr << "Alpha texture must be grayscale image: "
+                    << texture_filename << std::endl;
+          exit(1);
+        }
+
+        std::cout << "alpha_w = " << alpha_w << ", alpha_h = " << alpha_h << ", channels = " << comp << "\n";
+
+        alpha_image.resize(size_t(alpha_w * alpha_h));
+        memcpy(alpha_image.data(), image_data, size_t(alpha_w * alpha_h));
+
+        stbi_image_free(image_data);
+
+        has_alpha = true;
+      }
 
       if (mp->diffuse_texname.length() > 0) {
         // Only load the texture if it is not already loaded
@@ -303,32 +352,78 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
             }
           }
 
-          unsigned char* image =
-              stbi_load(texture_filename.c_str(), &w, &h, &comp, STBI_default);
-          if (!image) {
-            std::cerr << "Unable to load texture: " << texture_filename
-                      << std::endl;
-            exit(1);
+          std::vector<uint8_t> pixels;
+          {
+            unsigned char* image_data =
+                stbi_load(texture_filename.c_str(), &w, &h, &comp, STBI_default);
+            if (!image_data) {
+              std::cerr << "Unable to load texture: " << texture_filename
+                        << std::endl;
+              exit(1);
+            }
+            std::cout << "Loaded texture: " << texture_filename << ", w = " << w
+                      << ", h = " << h << ", comp = " << comp << std::endl;
+
+            pixels.resize(size_t(w * h * comp));
+            if (comp == 4) {
+              memcpy(pixels.data(), image_data, size_t(w * h * comp));
+
+              if (has_alpha) {
+                // Overwrite alpha channel with separate alpha image.
+                if (alpha_w != w) {
+                  std::cerr << "alpha image and color image has different image "
+                               "width.\n";
+                  exit(-1);
+                }
+                if (alpha_h != h) {
+                  std::cerr << "alpha image and color image has different image "
+                               "height.\n";
+                  exit(-1);
+                }
+
+                for (size_t i = 0; i < size_t(w * h); i++) {
+                  pixels[4 * i + 3] = alpha_image[i];
+                }
+              }
+            } else {
+              memcpy(pixels.data(), image_data, size_t(w * h * comp));
+            }
+
+            stbi_image_free(image_data);
           }
-          std::cout << "Loaded texture: " << texture_filename << ", w = " << w
-                    << ", h = " << h << ", comp = " << comp << std::endl;
 
           glGenTextures(1, &texture_id);
           glBindTexture(GL_TEXTURE_2D, texture_id);
           glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
           glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
           if (comp == 3) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB,
-                         GL_UNSIGNED_BYTE, image);
+                         GL_UNSIGNED_BYTE, pixels.data());
           } else if (comp == 4) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA,
-                         GL_UNSIGNED_BYTE, image);
+                         GL_UNSIGNED_BYTE, pixels.data());
           } else {
             assert(0);  // TODO
           }
           glBindTexture(GL_TEXTURE_2D, 0);
-          stbi_image_free(image);
-          textures.insert(std::make_pair(mp->diffuse_texname, texture_id));
+
+          objlab::Texture texture;
+          texture.gl_tex_id = uint32_t(texture_id);
+          texture.image_idx = int(images.size());
+
+          // TODO(LTE): Do not create duplicated image for same filename.
+          objlab::Image image;
+          image.data = pixels;
+
+          image.width = size_t(w);
+          image.height = size_t(h);
+          image.channels = comp;
+
+          images.emplace_back(image);
+
+          textures.insert(std::make_pair(mp->diffuse_texname, texture));
         }
       }
     }
@@ -534,15 +629,16 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
           mesh.texcoords.push_back(tc[k][0]);
           mesh.texcoords.push_back(tc[k][1]);
 
-          mesh.indices.push_back(3 * uint32_t(f) + 0);
-          mesh.indices.push_back(3 * uint32_t(f) + 1);
-          mesh.indices.push_back(3 * uint32_t(f) + 2);
-
-          // indices for OpenGL draw.
-          o.indices.push_back(3 * uint32_t(f) + 0);
-          o.indices.push_back(3 * uint32_t(f) + 1);
-          o.indices.push_back(3 * uint32_t(f) + 2);
         }
+
+        mesh.indices.push_back(3 * uint32_t(f) + 0);
+        mesh.indices.push_back(3 * uint32_t(f) + 1);
+        mesh.indices.push_back(3 * uint32_t(f) + 2);
+
+        // indices for OpenGL draw.
+        o.indices.push_back(3 * uint32_t(f) + 0);
+        o.indices.push_back(3 * uint32_t(f) + 1);
+        o.indices.push_back(3 * uint32_t(f) + 2);
 
         mesh.num_verts_per_faces.push_back(3);  // triangle
       }
@@ -590,12 +686,37 @@ static bool LoadObjAndConvert(float bmin[3], float bmax[3],
 }
 
 static void ChangeTextureParameter(
-    const std::map<std::string, GLuint>& textures,
+    const std::map<std::string, objlab::Texture>& textures,
     const objlab::gui_parameters& params) {
   for (const auto& item : textures) {
-    glBindTexture(GL_TEXTURE_2D, item.second);
+    glBindTexture(GL_TEXTURE_2D, item.second.gl_tex_id);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, params.texture_wrap_s);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, params.texture_wrap_t);
+  }
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+static void UpdateTextures(
+    const std::map<std::string, objlab::Texture>& textures,
+    const std::vector<objlab::Image>& images, const bool show_alpha) {
+  for (const auto& item : textures) {
+    glBindTexture(GL_TEXTURE_2D, item.second.gl_tex_id);
+
+    if (item.second.image_idx < 0) continue;  // invalid image index
+
+    const objlab::Image& image = images[size_t(item.second.image_idx)];
+    if (image.channels == 4) {
+      if (show_alpha) {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, GLint(image.width),
+                     GLint(image.height), 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     image.data.data());
+      } else {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, GLint(image.width),
+                     GLint(image.height), 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                     image.data.data());
+      }
+    }
   }
 
   glBindTexture(GL_TEXTURE_2D, 0);
@@ -733,7 +854,7 @@ static void motionFunc(GLFWwindow* window, double mouse_x, double mouse_y) {
 
 static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
                  const std::vector<tinyobj::material_t>& materials,
-                 const std::map<std::string, GLuint>& textures,
+                 const std::map<std::string, objlab::Texture>& textures,
                  bool draw_wireframe) {
   glPolygonMode(GL_FRONT, GL_FILL);
   glPolygonMode(GL_BACK, GL_FILL);
@@ -758,7 +879,7 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
       std::string diffuse_texname =
           materials[size_t(o.material_id)].diffuse_texname;
       if (textures.find(diffuse_texname) != textures.end()) {
-        glBindTexture(GL_TEXTURE_2D, textures.at(diffuse_texname));
+        glBindTexture(GL_TEXTURE_2D, textures.at(diffuse_texname).gl_tex_id);
       }
     }
     glVertexPointer(3, GL_FLOAT, stride, nullptr);
@@ -772,9 +893,10 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
     glTexCoordPointer(
         2, GL_FLOAT, stride,
         reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
-    //glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
+    // glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
     // TODO(LTE): index bufer.
-    glDrawElements(GL_TRIANGLES, GLsizei(o.indices.size()), GL_UNSIGNED_INT, o.indices.data());
+    glDrawElements(GL_TRIANGLES, GLsizei(o.indices.size()), GL_UNSIGNED_INT,
+                   o.indices.data());
     CheckGLErrors("drawelements");
     glBindTexture(GL_TEXTURE_2D, 0);
   }
@@ -807,9 +929,10 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
           2, GL_FLOAT, stride,
           reinterpret_cast<GLvoid*>(static_cast<uintptr_t>(sizeof(float) * 9)));
 
-      //glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
+      // glDrawArrays(GL_TRIANGLES, 0, 3 * o.numTriangles);
       // TODO(LTE): index bufer.
-      glDrawElements(GL_TRIANGLES, GLsizei(o.indices.size()), GL_UNSIGNED_INT, o.indices.data());
+      glDrawElements(GL_TRIANGLES, GLsizei(o.indices.size()), GL_UNSIGNED_INT,
+                     o.indices.data());
       CheckGLErrors("drawarrays");
     }
   }
@@ -840,8 +963,8 @@ void gui_new_frame() {
   ImGui::NewFrame();
 }
 
-void gl_new_frame(GLFWwindow* window, ImVec4 clear_color, bool depth_test, int* display_w,
-                  int* display_h) {
+void gl_new_frame(GLFWwindow* window, ImVec4 clear_color, bool depth_test,
+                  int* display_w, int* display_h) {
   // Rendering
   glfwGetFramebufferSize(window, display_w, display_h);
   glViewport(0, 0, *display_w, *display_h);
@@ -916,7 +1039,7 @@ static void initialize_imgui(GLFWwindow* window) {
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   // io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
-  float default_font_scale = 17.0f;
+  float default_font_scale = 18.0f;
   ImFontConfig roboto_config;
   strcpy(roboto_config.Name, "Roboto");
   roboto_config.SizePixels = default_font_scale;
@@ -1203,30 +1326,34 @@ void EditTransform(const float* cameraView, float* cameraProjection,
       boundSizing ? bounds : nullptr, boundSizingSnap ? boundsSnap : nullptr);
 }
 
-void SortIndices(const std::vector<objlab::Mesh> &meshes,
-  std::vector<objlab::DrawObject> *draw_objects,
-  const float view_origin[3], const float view_dir[3])
-{
+void SortIndices(const std::vector<objlab::Mesh>& meshes,
+                 std::vector<objlab::DrawObject>* draw_objects,
+                 const float view_origin[3], const float view_dir[3]) {
   auto start_time = std::chrono::system_clock::now();
 
-  for (const auto &mesh : meshes) {
-    std::cout << "---------------" << "\n";
+  for (const auto& mesh : meshes) {
+    std::cout << "---------------"
+              << "\n";
 
     // Assume all triangle mesh.
     assert((mesh.indices.size() % 3) == 0);
 
     std::vector<uint32_t> sorted_face_indices;
 
-    //for (size_t i = 0; i < mesh.indices.size(); i++) {
+    // for (size_t i = 0; i < mesh.indices.size(); i++) {
     //  std::cout << "indices = " << mesh.indices[i] << "\n";
     //}
 
-    face_sorter::TriangleFaceCenterAccessor<float> fa(mesh.vertices.data(), mesh.indices.data(), mesh.indices.size() / 3);
+    face_sorter::TriangleFaceCenterAccessor<float> fa(
+        mesh.vertices.data(), mesh.indices.data(), mesh.indices.size() / 3);
 
-    std::cout << "view_org = " << view_origin[0] << ", " << view_origin[1] << ", " << view_origin[2] << "\n";
-    std::cout << "view_dir = " << view_dir[0] << ", " << view_dir[1] << ", " << view_dir[2] << "\n";
+    std::cout << "view_org = " << view_origin[0] << ", " << view_origin[1]
+              << ", " << view_origin[2] << "\n";
+    std::cout << "view_dir = " << view_dir[0] << ", " << view_dir[1] << ", "
+              << view_dir[2] << "\n";
 
-    face_sorter::SortByBarycentricZ<float>(mesh.indices.size() / 3, view_origin, view_dir, fa, &sorted_face_indices);
+    face_sorter::SortByBarycentricZ<float>(mesh.indices.size() / 3, view_origin,
+                                           view_dir, fa, &sorted_face_indices);
 
     std::cout << "sorted_face_indices = " << sorted_face_indices.size() << "\n";
     std::cout << "mesh.indices = " << mesh.indices.size() << "\n";
@@ -1249,13 +1376,12 @@ void SortIndices(const std::vector<objlab::Mesh> &meshes,
       // std::cout << "sort = " << f0 << ", " << f1 << ", " << f2 << "\n";
     }
 
-    objlab::DrawObject &o = (*draw_objects)[size_t(draw_object_id)];
+    objlab::DrawObject& o = (*draw_objects)[size_t(draw_object_id)];
 
     assert(sorted_indices.size() == o.indices.size());
 
     // update indices
     o.indices = sorted_indices;
-
   }
 
   auto end_time = std::chrono::system_clock::now();
@@ -1289,6 +1415,9 @@ int main(int argc, char** argv) {
     std::cerr << "Failed to initialize GLFW." << std::endl;
     return -1;
   }
+
+  // MSAA
+  glfwWindowHint(GLFW_SAMPLES, 16);
 
 #if 0
     // Decide GL+GLSL versions
@@ -1353,11 +1482,13 @@ int main(int argc, char** argv) {
 
   float bmin[3], bmax[3];
   std::vector<tinyobj::material_t> materials;
-  std::map<std::string, GLuint> textures;
+  std::map<std::string, objlab::Texture> textures;
+  std::vector<objlab::Image> images;
   std::vector<objlab::Mesh> meshes;
 
   if (false == LoadObjAndConvert(bmin, bmax, &meshes, &draw_ctx.draw_objects,
-                                 materials, textures, obj_filename.c_str())) {
+                                 materials, textures, images,
+                                 obj_filename.c_str())) {
     return -1;
   }
 
@@ -1467,15 +1598,38 @@ int main(int argc, char** argv) {
 #endif
 
     {
-      bool texparam_changed = false;
       bool sort_pressed = false;
-      if (alpha_window(&gui_params, &texparam_changed, &sort_pressed)) {
+      bool save_pressed = false;
+      if (mesh_window(&gui_params, &sort_pressed, &save_pressed)) {
+
         if (sort_pressed) {
-          SortIndices(meshes, &draw_ctx.draw_objects, gui_params.alpha_view_origin, gui_params.alpha_view_dir);
+          SortIndices(meshes, &draw_ctx.draw_objects,
+                      gui_params.alpha_view_origin, gui_params.alpha_view_dir);
         }
 
+
+        if (save_pressed) {
+          if (!SaveMeshAsObj(meshes, gui_params.output_obj_basename)) {
+            std::cerr << "Failed to save .obj.\n";
+          } else {
+            std::cout << "Saved .obj : " << gui_params.output_obj_basename << ".obj\n";
+          }
+        }
+
+      }
+    }
+
+    {
+      bool texparam_changed = false;
+      bool show_alpha_changed = false;
+      if (alpha_window(&gui_params, &texparam_changed,
+                       &show_alpha_changed)) {
         if (texparam_changed) {
           ChangeTextureParameter(textures, gui_params);
+        }
+
+        if (show_alpha_changed) {
+          UpdateTextures(textures, images, gui_params.texture_show_alpha);
         }
       }
     }
@@ -1486,9 +1640,16 @@ int main(int argc, char** argv) {
     ImVec4 background_color = {gui_params.background_color[0],
                                gui_params.background_color[1],
                                gui_params.background_color[2], 1.0f};
-    gl_new_frame(window, background_color, gui_params.enable_depth_test, &display_w, &display_h);
+    gl_new_frame(window, background_color, gui_params.enable_depth_test,
+                 &display_w, &display_h);
 
     {
+      if (gui_params.enable_msaa) {
+        glEnable(GL_MULTISAMPLE);
+      } else {
+        glDisable(GL_MULTISAMPLE);
+      }
+
       glEnable(GL_TEXTURE_2D);
 
       if (gui_params.enable_alpha_texturing) {

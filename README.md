@@ -1,6 +1,6 @@
 # objlab, Simple Wavefront .obj viewer + some featues
 
-objlab is a simple Wavefront .obj viewer + some features, written in C++11.
+`objlab` is a simple Wavefront .obj viewer + some features, written in C++11.
 
 ## Requirements
 
@@ -27,7 +27,7 @@ $ make
 
 ## License
 
-objlab is licensed under MIT license.
+`objlab` is licensed under MIT license.
 
 
 ### Third party license

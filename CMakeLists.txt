@@ -23,6 +23,7 @@ set(OBJLAB_SOURCES
     src/app.cc
     src/face-sorter.cc
     src/gui-window.cc
+    src/obj-writer.cc
     src/main.cc
     )
 
