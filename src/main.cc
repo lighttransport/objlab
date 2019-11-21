@@ -1326,12 +1326,12 @@ void EditTransform(const float* cameraView, float* cameraProjection,
       boundSizing ? bounds : nullptr, boundSizingSnap ? boundsSnap : nullptr);
 }
 
-void SortIndices(const std::vector<objlab::Mesh>& meshes,
+void SortIndices(std::vector<objlab::Mesh>& meshes, // [inout]
                  std::vector<objlab::DrawObject>* draw_objects,
                  const float view_origin[3], const float view_dir[3]) {
   auto start_time = std::chrono::system_clock::now();
 
-  for (const auto& mesh : meshes) {
+  for (auto& mesh : meshes) {
     std::cout << "---------------"
               << "\n";
 
@@ -1382,6 +1382,10 @@ void SortIndices(const std::vector<objlab::Mesh>& meshes,
 
     // update indices
     o.indices = sorted_indices;
+
+    // also store sorted indices to Mesh
+    mesh.sorted_indices = sorted_indices;
+
   }
 
   auto end_time = std::chrono::system_clock::now();

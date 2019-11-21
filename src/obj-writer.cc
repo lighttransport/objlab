@@ -26,9 +26,12 @@ bool SaveMeshAsObj(const std::vector<Mesh> &meshes, const std::string &base_file
 
   const Mesh &mesh = meshes[0];
 
+  bool has_sorted_indices = (mesh.sorted_indices.size() == mesh.indices.size());
+
   bool has_normals = (mesh.normals.size() > 0) ? true : false;
   bool has_uvs = (mesh.texcoords.size() > 0) ? true : false;
 
+  std::cout << "Use sorted indices? " << has_sorted_indices << "\n";
   std::cout << "# of vertices = " << mesh.vertices.size() / 3 << "\n";
   std::cout << "# of normals = " << mesh.normals.size() / 3 << "\n";
   std::cout << "# of texcoords = " << mesh.texcoords.size() / 2 << "\n";
@@ -46,13 +49,15 @@ bool SaveMeshAsObj(const std::vector<Mesh> &meshes, const std::string &base_file
     ofs << "vt " << mesh.texcoords[2 * i + 0] << ", " << (1.f - mesh.texcoords[2 * i + 1]) << "\n";
   }
 
+  const std::vector<uint32_t> &indices = has_sorted_indices ? mesh.sorted_indices : mesh.indices;
+
   size_t idx_offset = 0;
   for (size_t i = 0; i < mesh.num_verts_per_faces.size(); i++) {
     ofs << "f";
     for (size_t v = 0; v < mesh.num_verts_per_faces[i]; v++) {
 
       // obj face start with 1.
-      size_t idx = mesh.indices[idx_offset + v] + 1;
+      size_t idx = indices[idx_offset + v] + 1;
 
       // assume same index number is used for vertex/normal/uv
 

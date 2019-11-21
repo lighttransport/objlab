@@ -13,6 +13,9 @@ struct Mesh {
   std::vector<float> texcoords; // UVUVUV..
   std::vector<uint8_t> num_verts_per_faces; // 3 = triangle, 4 = quad
 
+  // sorted indices for a given view config(this is for saving .obj)
+  std::vector<uint32_t> sorted_indices;
+
   int32_t draw_object_id; // Index to corresponding DrawObject
 
   bool triangles_only = false;
