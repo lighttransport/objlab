@@ -7,6 +7,11 @@
 * cmake
 * OpenGL 3.x
 
+## Supported platforms
+
+* Linux(Ubuntu)
+* Windows VS2015, VS2019
+
 ## Build
 
 ### Setup
