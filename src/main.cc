@@ -868,7 +868,9 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
   glPolygonMode(GL_BACK, GL_FILL);
 
   glEnable(GL_POLYGON_OFFSET_FILL);
+  glEnable(GL_TEXTURE_2D);
   glPolygonOffset(1.0, 1.0);
+  glColor3f(1.0f, 1.0f, 1.0f);
   GLsizei stride = (3 + 3 + 3 + 2) * sizeof(float);
   for (size_t i = 0; i < drawObjects.size(); i++) {
     objlab::DrawObject o = drawObjects[i];
@@ -952,7 +954,10 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
       glDrawElements(GL_TRIANGLES, GLsizei(o.indices.size()), GL_UNSIGNED_INT,
                      o.indices.data());
       CheckGLErrors("drawarrays");
+
+      glEnableClientState(GL_TEXTURE_COORD_ARRAY);
     }
+    glEnable(GL_TEXTURE_2D);
   }
 }
 
