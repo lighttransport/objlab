@@ -42,6 +42,9 @@ struct gui_parameters {
   // texture parameters
   int texture_wrap_s = GL_CLAMP_TO_EDGE;
   int texture_wrap_t = GL_CLAMP_TO_EDGE;
+  int texture_filter_min = GL_LINEAR; // linear or nearest
+  int texture_filter_mag = GL_LINEAR; // linear or nearest
+
   bool texture_show_alpha = false;  // Show alpha component of texture
 
 

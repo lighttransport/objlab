@@ -698,6 +698,8 @@ static void ChangeTextureParameter(
     glBindTexture(GL_TEXTURE_2D, item.second.gl_tex_id);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, params.texture_wrap_s);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, params.texture_wrap_t);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, params.texture_filter_min);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, params.texture_filter_mag);
   }
 
   glBindTexture(GL_TEXTURE_2D, 0);
