@@ -861,7 +861,7 @@ static void motionFunc(GLFWwindow* window, double mouse_x, double mouse_y) {
 static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
                  const std::vector<tinyobj::material_t>& materials,
                  const std::map<std::string, objlab::Texture>& textures,
-                 bool draw_wireframe) {
+                 bool draw_wireframe, bool show_texture) {
   glPolygonMode(GL_FRONT, GL_FILL);
   glPolygonMode(GL_BACK, GL_FILL);
 
@@ -877,16 +877,25 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
     glBindBuffer(GL_ARRAY_BUFFER, o.vb_id);
     glEnableClientState(GL_VERTEX_ARRAY);
     glEnableClientState(GL_NORMAL_ARRAY);
-    glEnableClientState(GL_COLOR_ARRAY);
+    if (show_texture) {
+      glDisableClientState(GL_COLOR_ARRAY);
+    } else {
+      glEnableClientState(GL_COLOR_ARRAY);
+    }
     glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    if ((o.material_id >= 0) && (o.material_id < int(materials.size()))) {
-      std::string diffuse_texname =
-          materials[size_t(o.material_id)].diffuse_texname;
-      if (textures.find(diffuse_texname) != textures.end()) {
-        glBindTexture(GL_TEXTURE_2D, textures.at(diffuse_texname).gl_tex_id);
+    if (show_texture) {
+      glEnable(GL_TEXTURE_2D);
+      if ((o.material_id >= 0) && (o.material_id < int(materials.size()))) {
+        std::string diffuse_texname =
+            materials[size_t(o.material_id)].diffuse_texname;
+        if (textures.find(diffuse_texname) != textures.end()) {
+          glBindTexture(GL_TEXTURE_2D, textures.at(diffuse_texname).gl_tex_id);
+        }
       }
+    } else {
+      glDisable(GL_TEXTURE_2D);
     }
     glVertexPointer(3, GL_FLOAT, stride, nullptr);
     // https://stackoverflow.com/questions/23177229/how-to-cast-int-to-const-glvoid
@@ -908,6 +917,7 @@ static void Draw(const std::vector<objlab::DrawObject>& drawObjects,
   }
 
   if (draw_wireframe) {
+    glDisable(GL_TEXTURE_2D);
     glDisable(GL_POLYGON_OFFSET_FILL);
     glPolygonMode(GL_FRONT, GL_LINE);
     glPolygonMode(GL_BACK, GL_LINE);
@@ -1709,7 +1719,7 @@ int main(int argc, char** argv) {
                    -0.5f * (bmax[2] + bmin[2]));
 
       Draw(draw_ctx.draw_objects, materials, textures,
-           gui_params.draw_wireframe);
+           gui_params.draw_wireframe, gui_params.show_texture);
 
       glEnable(GL_DEPTH_TEST);
       glEnable(GL_CULL_FACE);

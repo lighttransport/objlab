@@ -82,6 +82,7 @@ bool render_window(gui_parameters *params) {
     update |= ImGui::Checkbox("Enable backface cull", &params->enable_cull_face);
     update |= ImGui::Checkbox("Enable depth test", &params->enable_depth_test);
     update |= ImGui::Checkbox("Draw wireframe", &params->draw_wireframe);
+    update |= ImGui::Checkbox("Show texture", &params->show_texture);
     update |= ImGui::Checkbox("Enable MSAA", &params->enable_msaa);
 
     ImGui::Separator();

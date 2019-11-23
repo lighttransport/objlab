@@ -32,6 +32,7 @@ struct gui_parameters {
   // https://learnopengl.com/Advanced-OpenGL/Anti-Aliasing
   bool enable_msaa = true;  // Enable MSAA anti-aliasing?
   bool draw_wireframe = false;
+  bool show_texture = true;
 
   // polygon sorting for alpha
   // (coordinate is defined in left-handed)
